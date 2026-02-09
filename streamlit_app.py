@@ -1,28 +1,43 @@
 import streamlit as st
 import pandas as pd
+import urllib.parse
 
-# --- 1. SET THEME & PAGE CONFIG ---
-st.set_page_config(page_title="2026 Strategy Command", layout="wide")
+# --- 1. SETTINGS & THEME ---
+st.set_page_config(page_title="2026 Strategy Command", layout="wide", page_icon="🚀")
 
-# Custom CSS for a "Premium" look
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
-    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; background-color: #fcfcfd; }
-    .stMetric { background-color: white; border: 1px solid #f0f0f1; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-    .stDataFrame { border-radius: 12px; overflow: hidden; }
-    .main-header { font-size: 32px; font-weight: 700; color: #111827; margin-bottom: 5px; }
-    .sub-header { color: #6b7280; font-size: 16px; margin-bottom: 30px; }
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
+    
+    /* Metric Cards */
+    div[data-testid="stMetric"] {
+        background-color: white;
+        border: 1px solid #e2e8f0;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Clean Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f1f5f9;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] { background-color: #0f172a !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. MULTI-TAB DATA ENGINE ---
+# --- 2. DATA ENGINE ---
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
 @st.cache_data(ttl=300)
-def fetch_data(tab_name):
-    # This URL format is the key to accessing different tabs
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab_name}"
+def fetch_tab(name):
+    encoded_name = urllib.parse.quote(name)
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
     try:
         data = pd.read_csv(url)
         data.columns = [c.strip() for c in data.columns]
@@ -30,79 +45,70 @@ def fetch_data(tab_name):
     except:
         return pd.DataFrame()
 
-# --- 3. NAVIGATION & TABS ---
-st.markdown('<p class="main-header">🚀 Strategy AI Command Center</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">2026 Performance Monitoring & Deep Analysis</p>', unsafe_allow_html=True)
+# --- 3. NAVIGATION ---
+st.title("🚀 2026 Strategy Command Center")
+st.caption("Integrated Marketing & OKR Intelligence")
 
-# Define your tab names EXACTLY as they appear in Google Sheets
-available_tabs = ["MASTER_FEED", "Social_Media", "Top_Pages", "Keywords"] 
-selected_tab = st.tabs(available_tabs)
+# EXACT MATCH to your Google Sheet tabs
+tab_list = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
+ui_tabs = st.tabs(tab_list)
 
-# --- 4. LOOP THROUGH TABS ---
-for i, tab_name in enumerate(available_tabs):
-    with selected_tab[i]:
-        df = fetch_data(tab_name)
+# --- 4. DASHBOARD LOGIC ---
+for i, tab_name in enumerate(tab_list):
+    with ui_tabs[i]:
+        df = fetch_tab(tab_name)
         
         if not df.empty:
-            # --- FILTRATION BAR ---
-            st.markdown("### 🔍 Smart Filters")
-            cols = st.columns(min(len(df.columns), 4))
-            filtered_df = df.copy()
-            
-            # Create dynamic filters based on column names
-            for idx, col in enumerate(df.columns[:4]): # Limit to first 4 for layout
-                if df[col].dtype == 'object':
-                    with cols[idx]:
-                        pick = st.multiselect(f"Select {col}", options=df[col].unique(), default=df[col].unique())
-                        filtered_df = filtered_df[filtered_df[col].isin(pick)]
-
-            # --- KEY PERFORMANCE INDICATORS ---
-            st.markdown("---")
+            # Metrics Row
+            nums = df.select_dtypes(include=['number']).columns
             m1, m2, m3, m4 = st.columns(4)
-            
-            # Auto-detect a numeric column for the metric
-            numeric_cols = filtered_df.select_dtypes(include=['number']).columns
-            target_col = numeric_cols[0] if not numeric_cols.empty else None
-
             with m1:
-                total = filtered_df[target_col].sum() if target_col else len(filtered_df)
-                st.metric(label=f"Total {target_col if target_col else 'Rows'}", value=f"{total:,.0f}")
+                val = df[nums[0]].sum() if not nums.empty else len(df)
+                st.metric(f"Total {nums[0] if not nums.empty else 'Rows'}", f"{val:,.0f}")
             with m2:
-                st.metric(label="Unique Segments", value=len(filtered_df.iloc[:, 0].unique()))
+                st.metric("Entries", len(df))
             with m3:
-                st.metric(label="Data Recency", value="Live")
+                # Finding a dimension for "Scope"
+                scope = df.iloc[:, 0].nunique()
+                st.metric("Unique Segments", scope)
             with m4:
-                st.metric(label="Status", value="Healthy", delta="OK")
+                st.metric("System", "Online", delta="Healthy")
 
-            # --- VISUALIZATION ---
-            st.markdown("### 📊 Analytics Overview")
-            v1, v2 = st.columns([2, 1])
+            # Filters & Content
+            col_chart, col_table = st.columns([1.5, 1])
             
-            with v1:
-                if target_col and 'Month' in filtered_df.columns:
-                    st.area_chart(filtered_df, x='Month', y=target_col)
+            with col_chart:
+                st.markdown(f"### {tab_name} Analysis")
+                if not nums.empty:
+                    # Look for Month/Date column
+                    x_axis = 'Month' if 'Month' in df.columns else df.columns[0]
+                    st.area_chart(df, x=x_axis, y=nums[0], color="#0f172a")
                 else:
-                    st.bar_chart(filtered_df.iloc[:, :2])
-            
-            with v2:
-                st.write("Top 5 Performance")
-                st.dataframe(filtered_df.head(5), use_container_width=True)
+                    st.info("No numeric columns found for trend mapping.")
 
-            # --- THE AI ANALYST ---
-            st.markdown("---")
-            st.markdown("### 🤖 Chat with this Dataset")
+            with col_table:
+                st.markdown("### Data Preview")
+                st.dataframe(df.head(15), use_container_width=True, hide_index=True)
+
+            # --- SMART AI SEARCH ---
+            st.divider()
+            st.markdown(f"### 🤖 AI Search: {tab_name}")
             user_q = st.chat_input(f"Ask about {tab_name}...", key=f"chat_{tab_name}")
-            
+
             if user_q:
                 with st.chat_message("assistant"):
-                    # Smarter Search Logic
-                    q = user_q.lower()
-                    results = df[df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)]
+                    # Smarter filtering logic (Keywords)
+                    words = user_q.lower().split()
+                    results = df.copy()
+                    for word in words:
+                        results = results[results.apply(lambda row: row.astype(str).str.lower().str.contains(word).any(), axis=1)]
+                    
                     if not results.empty:
-                        st.write(f"Based on the **{tab_name}** data, I found:")
-                        st.dataframe(results)
+                        st.write(f"I found **{len(results)}** matching records:")
+                        st.dataframe(results, use_container_width=True)
+                        if not nums.empty:
+                            st.success(f"**Quick Insight:** The total **{nums[0]}** for this search is **{results[nums[0]].sum():,.0f}**")
                     else:
-                        st.write("I couldn't find a direct match. Try searching for a specific keyword or value.")
-
+                        st.warning("No matches found. Try using single keywords.")
         else:
-            st.info(f"Tab '{tab_name}' not found or empty. Ensure tab names match your Google Sheet exactly.")
+            st.error(f"Tab '{tab_name}' not found. Please check spelling in Google Sheets.")
