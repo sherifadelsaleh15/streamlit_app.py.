@@ -2,149 +2,115 @@ import streamlit as st
 import pandas as pd
 
 # --- PAGE CONFIG ---
-st.set_page_config(
-    page_title="2026 Strategy Command Center", 
-    page_icon="🚀", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="2026 Strategy Command Center", layout="wide")
 
-# --- CUSTOM THEME & CSS ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
-    /* Professional Metric Cards */
-    [data-testid="stMetric"] {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        border: 1px solid #f0f2f6;
-    }
-    /* Main App Background */
-    .stApp {
-        background-color: #f8f9fa;
-    }
-    /* Section Headers */
-    .header-style {
-        font-size: 24px;
-        font-weight: bold;
-        color: #1E3A8A;
-        margin-bottom: 20px;
-    }
+    [data-testid="stMetric"] { background-color: #ffffff; padding: 15px; border-radius: 10px; border: 1px solid #e0e0e0; }
+    .stApp { background-color: #f9fbff; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- DATA ENGINE ---
-# Using your provided Sheet ID: 1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY
 url = "https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/export?format=csv"
 
-@st.cache_data(ttl=300) # Auto-refresh every 5 minutes
+@st.cache_data(ttl=60)
 def load_data():
-    try:
-        data = pd.read_csv(url)
-        # Standardize column names (remove hidden spaces and map to clean keys)
-        data.columns = [c.strip() for c in data.columns]
-        mapping = {
-            'Month': 'Date_Month', 
-            'Region/Country': 'Region', 
-            'Metric Name': 'Metric',
-            'Objective ID': 'Objective'
-        }
-        return data.rename(columns=mapping)
-    except Exception as e:
-        st.error(f"Data Load Error: {e}")
-        return pd.DataFrame()
+    data = pd.read_csv(url)
+    data.columns = [c.strip() for c in data.columns]
+    # Standardizing names for the engine
+    mapping = {
+        'Month': 'Month', 
+        'Region/Country': 'Region', 
+        'Metric Name': 'Metric',
+        'Objective ID': 'Objective',
+        'OKR_ID': 'OKR_ID'
+    }
+    return data.rename(columns=mapping)
 
 df = load_data()
 
-# --- DASHBOARD HEADER ---
+# --- SIDEBAR: DEEP FILTRATION ---
+with st.sidebar:
+    st.header("🔍 Global Filters")
+    
+    # Hierarchical Filters
+    sel_months = st.multiselect("Select Months", options=df['Month'].unique(), default=df['Month'].unique())
+    sel_regions = st.multiselect("Select Regions", options=df['Region'].unique(), default=df['Region'].unique())
+    sel_objectives = st.multiselect("Select Objectives", options=df['Objective'].unique(), default=df['Objective'].unique())
+    sel_metrics = st.multiselect("Select Metrics", options=df['Metric'].unique(), default=df['Metric'].unique())
+    sel_okrs = st.multiselect("Select OKR IDs", options=df['OKR_ID'].unique(), default=df['OKR_ID'].unique())
+
+# Apply All Filters
+f_df = df[
+    (df['Month'].isin(sel_months)) & 
+    (df['Region'].isin(sel_regions)) & 
+    (df['Objective'].isin(sel_objectives)) & 
+    (df['Metric'].isin(sel_metrics)) & 
+    (df['OKR_ID'].isin(sel_okrs))
+]
+
+# --- DASHBOARD LAYOUT ---
 st.title("🚀 2026 Strategy Command Center")
-st.markdown("---")
 
-if not df.empty:
-    # --- TOP ROW: KPI SUMMARY CARDS ---
-    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+# Row 1: KPI Cards
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.metric("Filtered Sum", f"{pd.to_numeric(f_df['Value'], errors='coerce').sum():,.0f}")
+with c2:
+    st.metric("Avg Performance", f"{pd.to_numeric(f_df['Value'], errors='coerce').mean():,.1f}")
+with c3:
+    st.metric("Data Points", len(f_df))
+with c4:
+    st.metric("Active Objectives", len(f_df['Objective'].unique()))
+
+st.divider()
+
+# Row 2: Visuals
+col_a, col_b = st.columns([1, 1])
+
+with col_a:
+    st.subheader("📊 Trend by Month")
+    if not f_df.empty:
+        # Grouping data for a cleaner line chart
+        chart_data = f_df.groupby('Month')['Value'].sum().reset_index()
+        st.line_chart(chart_data, x="Month", y="Value")
+
+with col_b:
+    st.subheader("📍 Contribution by Region")
+    if not f_df.empty:
+        region_data = f_df.groupby('Region')['Value'].sum().reset_index()
+        st.bar_chart(region_data, x="Region", y="Value")
+
+# Row 3: The Data Table
+st.subheader("📋 Filtered Intelligence")
+st.dataframe(f_df, use_container_width=True)
+
+# --- SMART AI CHAT ENGINE ---
+st.divider()
+st.subheader("💬 Smart Chat Assistant")
+user_input = st.chat_input("Ex: 'Active Users January' or 'Germany Objective 1'")
+
+if user_input:
+    with st.chat_message("user"):
+        st.write(user_input)
     
-    with kpi_col1:
-        total_val = pd.to_numeric(df['Value'], errors='coerce').sum()
-        st.metric("Global Cumulative Value", f"{total_val:,.0f}")
-    
-    with kpi_col2:
-        active_markets = len(df['Region'].unique())
-        st.metric("Active Markets", active_markets)
+    with st.chat_message("assistant"):
+        # SMART SEARCH: Split input into keywords
+        keywords = user_input.lower().split()
         
-    with kpi_col3:
-        unique_metrics = len(df['Metric'].unique())
-        st.metric("Tracked OKRs", unique_metrics)
-
-    with kpi_col4:
-        st.metric("Sync Status", "Live", delta="200 OK")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- SIDEBAR FILTERS ---
-    with st.sidebar:
-        st.header("🎛️ Dashboard Controls")
-        st.write("Filter the charts and tables below:")
+        # Search for rows that contain ALL keywords
+        search_results = df.copy()
+        for word in keywords:
+            search_results = search_results[search_results.apply(lambda row: row.astype(str).str.lower().str.contains(word).any(), axis=1)]
         
-        # Region Filter
-        all_regions = sorted(df['Region'].unique())
-        sel_region = st.multiselect("Select Target Region", all_regions, default=all_regions)
-        
-        # Metric Filter
-        all_metrics = sorted(df['Metric'].unique())
-        sel_metric = st.selectbox("Select Focus Metric", all_metrics)
-        
-        st.divider()
-        st.info("💡 Tip: Use the Chat box at the bottom to find specific data points across all months.")
-
-    # --- FILTER LOGIC ---
-    mask = (df['Region'].isin(sel_region)) & (df['Metric'] == sel_metric)
-    filtered_df = df[mask]
-
-    # --- MAIN VISUALS SECTION ---
-    col_table, col_chart = st.columns([1, 1.2], gap="large")
-
-    with col_table:
-        st.markdown('<p class="header-style">📋 Performance Records</p>', unsafe_allow_html=True)
-        st.dataframe(
-            filtered_df, 
-            use_container_width=True, 
-            height=400,
-            column_config={
-                "Value": st.column_config.NumberColumn(format="%d"),
-                "Source": st.column_config.TextColumn(help="Data Origin Platform")
-            }
-        )
-
-    with col_chart:
-        st.markdown('<p class="header-style">📈 Trend Analysis</p>', unsafe_allow_html=True)
-        if not filtered_df.empty:
-            # Sort by Date_Month if possible, or just plot sequence
-            st.line_chart(filtered_df, x="Date_Month", y="Value", color="#1E3A8A")
-        else:
-            st.warning("No data found for the selected filters.")
-
-    # --- FUNCTIONAL CHAT ENGINE ---
-    st.markdown("---")
-    st.markdown('<p class="header-style">💬 Chat with your Data</p>', unsafe_allow_html=True)
-    
-    prompt = st.chat_input("Ask me something (e.g., 'Show Portugal' or 'What happened in January?')")
-
-    if prompt:
-        with st.chat_message("user"):
-            st.write(prompt)
-        
-        with st.chat_message("assistant"):
-            # The "AI" logic: Keyword search across the whole database
-            query = prompt.strip().lower()
-            chat_results = df[df.apply(lambda row: row.astype(str).str.lower().str.contains(query).any(), axis=1)]
+        if not search_results.empty:
+            st.write(f"I found {len(search_results)} records for your request:")
+            st.dataframe(search_results, use_container_width=True)
             
-            if not chat_results.empty:
-                st.write(f"I analyzed the 2026 records. Here are the matches for **'{prompt}'**:")
-                st.dataframe(chat_results, use_container_width=True)
-            else:
-                st.write(f"I couldn't find a direct match for **'{prompt}'** in the current dataset. Try searching for a specific Country, Metric, or Month.")
-
-else:
-    st.error("Waiting for data... Please check your Google Sheet sharing settings.")
+            # Simple AI Insight
+            total_val = pd.to_numeric(search_results['Value'], errors='coerce').sum()
+            st.success(f"**Insight:** For this selection, the total value is **{total_val:,.0f}** across {len(search_results['Region'].unique())} regions.")
+        else:
+            st.warning("No direct match. Try using simpler keywords (e.g., 'Users Jan' instead of full sentences).")
