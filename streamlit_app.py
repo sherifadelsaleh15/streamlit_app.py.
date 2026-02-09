@@ -1,55 +1,72 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# 1. Page Config
-st.set_page_config(page_title="2026 OKR Dashboard", layout="wide")
+st.set_page_config(page_title="2026 Strategy Dashboard", layout="wide")
 st.title("🚀 2026 Strategy AI Dashboard")
 
-# 2. Your Converted Sheet Link (Machine Readable)
-# Your ID: 1WcEEqPkzvGW
-# Formatted for Streamlit connection:
-url = "https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/edit?usp=sharing"
+# 1. YOUR NEW SHEET ID LINK (Direct Export)
+# Sheet ID extracted from your URL: 1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY
+url = "https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/export?format=csv"
 
-# 3. Connect using the library
+@st.cache_data(ttl=300) # Refresh data every 5 minutes
+def load_data(sheets_url):
+    data = pd.read_csv(sheets_url)
+    
+    # --- AUTO-FIX COLUMN NAMES ---
+    # This maps your sheet's column names to standard names the dashboard uses
+    mapping = {
+        'Month ': 'Date_Month', # Added a space because sometimes sheets have trailing spaces
+        'Month': 'Date_Month',
+        'Region/Country': 'Region',
+        'Metric Name': 'Metric_Name',
+        'Objective ID': 'Objective_ID',
+        'Value': 'Value'
+    }
+    data = data.rename(columns=mapping)
+    return data
+
 try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    # We use the public URL directly in the read function
-    df = conn.read(spreadsheet=url, ttl="5m") 
-
-    # 4. Sidebar Filters
+    df = load_data(url)
+    
+    # 2. Sidebar Filters
     st.sidebar.header("Filter Analytics")
     
-    # Check if columns exist before filtering to prevent errors
-    if not df.empty:
-        # If your columns have different names in the sheet, update these strings:
-        region_col = "Region" if "Region" in df.columns else df.columns[1]
-        source_col = "Source" if "Source" in df.columns else df.columns[4]
+    # Filter by Region
+    if "Region" in df.columns:
+        region_list = df["Region"].unique()
+        selected_regions = st.sidebar.multiselect("Select Region", options=region_list, default=region_list)
+        df = df[df["Region"].isin(selected_regions)]
 
-        regions = st.sidebar.multiselect("Select Region", options=df[region_col].unique(), default=df[region_col].unique())
-        sources = st.sidebar.multiselect("Select Source", options=df[source_col].unique(), default=df[source_col].unique())
+    # Filter by Metric
+    if "Metric_Name" in df.columns:
+        metrics = df["Metric_Name"].unique()
+        selected_metrics = st.sidebar.multiselect("Select Metrics", options=metrics, default=metrics)
+        df = df[df["Metric_Name"].isin(selected_metrics)]
 
-        # Filter Logic
-        mask = df[region_col].isin(regions) & df[source_col].isin(sources)
-        filtered_df = df[mask]
+    # 3. Main Dashboard Display
+    st.subheader("📊 Data Overview")
+    st.dataframe(df, use_container_width=True)
 
-        # 5. Display Data & Charts
-        st.subheader("📊 Performance Overview")
-        st.dataframe(filtered_df, use_container_width=True)
+    # 4. Charting Logic
+    # Note: Ensure the "Month" column in your sheet contains dates or text like "January"
+    if "Date_Month" in df.columns and "Value" in df.columns:
+        st.subheader("📈 Performance Trend")
         
-        if "Value" in filtered_df.columns:
-            st.line_chart(data=filtered_df, x="Date_Month", y="Value")
-        else:
-            st.info("Add a column named 'Value' to see the line chart.")
+        # Clean the 'Value' column to make sure it's a number
+        df["Value"] = pd.to_numeric(df["Value"], errors='coerce')
+        
+        # Create the chart
+        st.line_chart(df, x="Date_Month", y="Value")
+    else:
+        st.warning("Ensure your sheet has 'Month' and 'Value' columns filled with data.")
 
 except Exception as e:
-    st.error(f"Connection Error: {e}")
-    st.info("Check that your Google Sheet is set to 'Anyone with the link can view'.")
+    st.error(f"Dashboard Error: {e}")
+    st.info("Make sure your Google Sheet is shared as 'Anyone with the link can view'.")
 
-# 6. AI Chat Box
+# 5. AI Interaction
 st.divider()
 st.subheader("💬 Chat with your Data")
-user_question = st.chat_input("Ask me about your February progress...")
+user_question = st.chat_input("Ask about Objective 1 performance...")
 if user_question:
-    st.write(f"Assistant: I am analyzing your data for: '{user_question}'")
-    st.write("Feature coming soon: Integrating LLM for deeper insights.")
+    st.write(f"Assistant: Looking into '{user_question}' for you...")
