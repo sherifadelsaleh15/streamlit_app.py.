@@ -9,20 +9,28 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #ffffff; }
-    .okr-container {
-        border: 1px solid #e2e8f0;
+    
+    .okr-card {
+        border: 1px solid #f1f5f9;
         padding: 24px;
-        border-radius: 8px;
+        border-radius: 12px;
         background-color: #ffffff;
-        margin-bottom: 32px;
+        margin-bottom: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
     }
-    .okr-header {
-        font-size: 1.1rem;
+    .okr-label {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 4px;
+    }
+    .okr-value-title {
+        font-size: 1.4rem;
         font-weight: 700;
         color: #0f172a;
-        margin-bottom: 12px;
-        text-transform: uppercase;
-        letter-spacing: 0.025em;
+        margin-bottom: 20px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -38,12 +46,13 @@ def fetch_data(tab_name):
         df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Expanded Mapping to prevent AttributeError
+        # Robust Mapping logic
         mapping = {
             'Month': 'Month', 'Date_Month': 'Month', 'Date Month': 'Month',
             'Region/Country': 'Region', 'Region': 'Region',
             'Metric Name': 'OKR_Name', 'OKR_ID': 'OKR_Name', 'Metric_Name': 'OKR_Name',
-            'Objective ID': 'OKR_Name', 'Page Path': 'OKR_Name', 'Query': 'OKR_Name'
+            'Objective ID': 'OKR_Name', 'Page Path': 'OKR_Name', 'Query': 'OKR_Name',
+            'Social Network': 'OKR_Name', 'Channel': 'OKR_Name'
         }
         df = df.rename(columns=mapping)
         
@@ -53,7 +62,7 @@ def fetch_data(tab_name):
     except Exception:
         return pd.DataFrame()
 
-# --- 3. NAVIGATION & FILTERS ---
+# --- 3. NAVIGATION ---
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
 selected_tab = st.sidebar.selectbox("Data Source", tabs)
 
@@ -63,76 +72,79 @@ if not df.empty:
     # Sidebar Filters
     st.sidebar.markdown("---")
     
-    # Dynamic month sorting
-    months = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
-    sel_months = st.sidebar.multiselect("Months", options=months, default=months, key=f"m_{selected_tab}")
+    # Check for columns before creating filters to avoid errors
+    month_opts = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
+    sel_months = st.sidebar.multiselect("Filter Months", month_opts, default=month_opts, key=f"m_{selected_tab}")
     
-    regions = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
-    sel_regions = st.sidebar.multiselect("Regions", options=regions, default=regions, key=f"r_{selected_tab}")
+    reg_opts = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
+    sel_regions = st.sidebar.multiselect("Filter Regions", reg_opts, default=reg_opts, key=f"r_{selected_tab}")
 
-    # Filter Application
+    # Process Filtering
     f_df = df.copy()
-    if sel_months:
+    if sel_months and 'Month' in f_df.columns:
         f_df = f_df[f_df['Month'].isin(sel_months)]
-    if sel_regions:
+    if sel_regions and 'Region' in f_df.columns:
         f_df = f_df[f_df['Region'].isin(sel_regions)]
 
-    # --- 4. MAIN DASHBOARD ---
-    st.markdown(f"### {selected_tab.replace('_', ' ')} Performance")
-    
-    # Safe Column Identification
-    id_col = 'OKR_Name' if 'OKR_Name' in f_df.columns else None
-    
-    # If OKR_Name is missing, try to use the first text column as a fallback
-    if id_col is None:
-        text_cols = f_df.select_dtypes(include=['object']).columns
-        if len(text_cols) > 0:
-            id_col = text_cols[0]
+    # --- 4. OKR VISUALIZATION ---
+    st.markdown(f"### {selected_tab.replace('_', ' ')}")
 
+    # FAIL-SAFE COLUMN DETECTION
+    # If OKR_Name isn't found, use the first string-based column available
+    id_col = 'OKR_Name' if 'OKR_Name' in f_df.columns else None
+    if id_col is None:
+        object_cols = f_df.select_dtypes(include=['object']).columns
+        # Exclude 'Month' and 'Region' from being the Title
+        possible_titles = [c for c in object_cols if c not in ['Month', 'Region']]
+        id_col = possible_titles[0] if possible_titles else None
+
+    # Only run charting if we have an ID column and a Value column
     if id_col and 'Value' in f_df.columns:
-        unique_okrs = f_df[id_col].unique()
+        unique_items = f_df[id_col].unique()
         
-        for okr in unique_okrs:
-            okr_subset = f_df[f_df[id_col] == okr]
+        for item in unique_items:
+            subset = f_df[f_df[id_col] == item]
             
-            # Sort subset by month if possible to ensure chart continuity
-            if 'Month' in okr_subset.columns:
-                # Basic alphabetical sort for months (Jan, Feb...)
-                okr_subset = okr_subset.sort_values('Month')
+            # Month sorting (Basic alpha-sort for Jan, Feb, etc.)
+            if 'Month' in subset.columns:
+                subset = subset.sort_values('Month')
 
             with st.container():
-                st.markdown('<div class="okr-container">', unsafe_allow_html=True)
-                st.markdown(f'<div class="okr-header">{okr}</div>', unsafe_allow_html=True)
+                st.markdown('<div class="okr-card">', unsafe_allow_html=True)
+                st.markdown(f'<div class="okr-label">{id_col.replace("_", " ")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="okr-value-title">{item}</div>', unsafe_allow_html=True)
                 
-                chart_col, data_col = st.columns([2.5, 1])
+                chart_c, data_c = st.columns([3, 1])
                 
-                with chart_col:
-                    st.area_chart(okr_subset, x='Month' if 'Month' in okr_subset.columns else None, y='Value', color="#0f172a")
+                with chart_c:
+                    # Clean black area chart
+                    st.area_chart(subset, x='Month' if 'Month' in subset.columns else None, y='Value', color="#0f172a")
                 
-                with data_col:
-                    st.metric("Total", f"{okr_subset['Value'].sum():,.0f}")
-                    st.dataframe(okr_subset[['Month', 'Value']], hide_index=True, use_container_width=True)
+                with data_c:
+                    st.metric("Total", f"{subset['Value'].sum():,.0f}")
+                    st.dataframe(subset[['Month', 'Value']], hide_index=True, use_container_width=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.dataframe(f_df, use_container_width=True)
 
-    # --- 5. AI CHAT ASSISTANT ---
-    st.markdown("---")
-    st.markdown("### AI Data Assistant")
-    user_query = st.chat_input("Search metrics or regions...")
+    # --- 5. AI DATA CHAT ---
+    st.divider()
+    st.markdown("### Assistant Intelligence")
+    query = st.chat_input("Ask about specific OKRs or trends...")
     
-    if user_query:
+    if query:
         with st.chat_message("assistant"):
-            keywords = user_query.lower().split()
-            search_results = df.copy()
-            for word in keywords:
-                search_results = search_results[search_results.apply(lambda row: row.astype(str).str.lower().str.contains(word).any(), axis=1)]
+            terms = query.lower().split()
+            results = df.copy()
+            for t in terms:
+                results = results[results.apply(lambda r: r.astype(str).str.lower().str.contains(t).any(), axis=1)]
             
-            if not search_results.empty:
-                st.write(f"Results for '{user_query}':")
-                st.dataframe(search_results, use_container_width=True)
+            if not results.empty:
+                st.write(f"Search results for '{query}':")
+                st.dataframe(results, use_container_width=True)
             else:
-                st.write("No matching data found.")
+                st.write("No matching intelligence found for those keywords.")
+
 else:
-    st.info("Awaiting data connection. Verify tab names in Google Sheets.")
+    st.info("System Ready. Connect Google Sheet tabs to initialize.")
