@@ -12,7 +12,6 @@ st.markdown("""
     html, body, [class*="css"] {
         font-family: 'Poppins', sans-serif;
         background-color: #f8fafc;
-        color: #1e293b;
     }
     
     .obj-section-header {
@@ -21,8 +20,8 @@ st.markdown("""
         color: #0f172a;
         margin-top: 40px;
         margin-bottom: 20px;
-        padding-left: 10px;
         border-left: 6px solid #3b82f6;
+        padding-left: 15px;
     }
     
     .metric-card {
@@ -30,28 +29,25 @@ st.markdown("""
         border: 1px solid #e2e8f0;
         border-radius: 16px;
         padding: 24px;
-        margin-bottom: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-bottom: 30px;
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.04);
     }
     
-    .card-metric-name {
-        font-size: 1.3rem;
+    .metric-name-header {
+        font-size: 1.4rem;
         font-weight: 700;
         color: #2563eb;
-        margin-bottom: 2px;
+        margin-bottom: 5px;
     }
 
-    .card-obj-subtitle {
+    .objective-subtitle {
         font-size: 0.9rem;
         font-weight: 600;
         color: #64748b;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
+        display: block;
     }
-
-    .stat-label { font-size: 0.8rem; font-weight: 600; color: #94a3b8; }
-    .stat-value { font-size: 2.2rem; font-weight: 700; color: #0f172a; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -64,85 +60,83 @@ def fetch_data(tab_name):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
     try:
         df = pd.read_csv(url)
+        # Clean headers only (no renaming yet)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Mapping to find Metric Name and Objective
-        mapping = {
-            'Month': 'Month', 'Date_Month': 'Month', 'Date Month': 'Month',
-            'Region/Country': 'Region', 'Region': 'Region',
-            'Objective ID': 'Objective', 'Objective_ID': 'Objective',
-            'Metric Name': 'Metric_Name', 'Metric_Name': 'Metric_Name', 
-            'OKR_ID': 'Metric_Name', 'Page Path': 'Metric_Name', 
-            'Query': 'Metric_Name', 'Social Network': 'Metric_Name'
-        }
-        df = df.rename(columns=mapping)
-        df = df.loc[:, ~df.columns.duplicated()]
-        
-        if 'Value' in df.columns:
-            df['Value'] = pd.to_numeric(df['Value'], errors='coerce').fillna(0)
+        # Ensure 'Value' is numeric
+        val_col = next((c for c in df.columns if c.lower() in ['value', 'views', 'clicks']), None)
+        if val_col:
+            df[val_col] = pd.to_numeric(df[val_col], errors='coerce').fillna(0)
             
-        return df
+        return df, val_col
     except:
-        return pd.DataFrame()
+        return pd.DataFrame(), None
 
 # --- 3. NAVIGATION ---
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
-selected_tab = st.sidebar.selectbox("Data Layer", tabs)
-df = fetch_data(selected_tab)
+selected_tab = st.sidebar.selectbox("Data Source", tabs)
+df, value_column = fetch_data(selected_tab)
 
-# --- 4. DASHBOARD ---
+# --- 4. DASHBOARD RENDERER ---
 if not df.empty:
-    st.title(f"Performance Analysis: {selected_tab}")
-    
-    # Global Filters
-    with st.expander("Filter Data", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            m_list = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
-            sel_m = st.multiselect("Months", m_list, default=m_list)
-        with c2:
-            r_list = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
-            sel_r = st.multiselect("Regions", r_list, default=r_list)
+    st.title(f"Strategic Review: {selected_tab.replace('_', ' ')}")
 
-    f_df = df.copy()
-    if sel_m and 'Month' in f_df.columns: f_df = f_df[f_df['Month'].isin(sel_m)]
-    if sel_r and 'Region' in f_df.columns: f_df = f_df[f_df['Region'].isin(sel_r)]
+    # Identification of Key Columns
+    # We look for Objective and Metric/OKR names dynamically
+    obj_col = next((c for c in df.columns if 'objective' in c.lower()), None)
+    # The Metric Name is usually 'Metric Name', 'OKR_ID', 'Page Path', etc.
+    name_col = next((c for c in df.columns if any(x in c.lower() for x in ['metric', 'okr', 'path', 'query', 'network'])), None)
 
-    # --- HIERARCHY RENDERER ---
-    obj_col = 'Objective' if 'Objective' in f_df.columns else None
-    met_col = 'Metric_Name' if 'Metric_Name' in f_df.columns else None
-    
-    if not obj_col:
-        f_df['Objective'] = "Standard Objectives"
-        obj_col = 'Objective'
-
-    if met_col and 'Value' in f_df.columns:
-        for obj in f_df[obj_col].unique():
-            st.markdown(f'<div class="obj-section-header">{obj}</div>', unsafe_allow_html=True)
+    if name_col and value_column:
+        # Group by Objective if it exists
+        groups = df[obj_col].unique() if obj_col else ["General Metrics"]
+        
+        for group in groups:
+            st.markdown(f'<div class="obj-section-header">{group}</div>', unsafe_allow_html=True)
             
-            obj_data = f_df[f_df[obj_col] == obj]
-            for metric in obj_data[met_col].unique():
-                m_subset = obj_data[obj_data[met_col] == metric]
-                if 'Month' in m_subset.columns: m_subset = m_subset.sort_values('Month')
+            # Filter data for this group
+            group_df = df[df[obj_col] == group] if obj_col else df
+            
+            # Unique Metrics in this group
+            metrics = group_df[name_col].unique()
+            
+            for m_name in metrics:
+                m_data = group_df[group_df[name_col] == m_name]
+                
+                # Sort by Month
+                month_col = next((c for c in df.columns if 'month' in c.lower()), None)
+                if month_col:
+                    m_data = m_data.sort_values(month_col)
 
-                # THE CARD
+                # RENDER CARD
                 with st.container():
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                     
-                    # Explicit Metric Name and Objective Label
-                    st.markdown(f'<div class="card-metric-name">{metric}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="card-obj-subtitle">Objective: {obj}</div>', unsafe_allow_html=True)
+                    # THE FIX: Display the actual name from your spreadsheet column
+                    st.markdown(f'<div class="metric-name-header">{m_name}</div>', unsafe_allow_html=True)
+                    if obj_col:
+                        st.markdown(f'<span class="objective-subtitle">Objective: {group}</span>', unsafe_allow_html=True)
                     
-                    c_left, c_right = st.columns([3, 1])
-                    with c_left:
-                        st.area_chart(m_subset, x='Month' if 'Month' in m_subset.columns else None, y='Value', color="#2563eb")
-                    with c_right:
-                        total = m_subset['Value'].sum()
-                        st.markdown('<div class="stat-label">AGGREGATE VALUE</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="stat-value">{total:,.0f}</div>', unsafe_allow_html=True)
-                        st.dataframe(m_subset[['Month', 'Value']], hide_index=True, use_container_width=True)
+                    col_chart, col_data = st.columns([3, 1])
+                    
+                    with col_chart:
+                        st.area_chart(m_data, x=month_col, y=value_column, color="#2563eb")
+                    
+                    with col_data:
+                        total_val = m_data[value_column].sum()
+                        st.metric("Total Progress", f"{total_val:,.0f}")
+                        st.dataframe(m_data[[month_col, value_column]], hide_index=True)
+                        
                     st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.dataframe(f_df)
+        st.warning("Could not automatically detect Metric or Value columns. Showing raw data.")
+        st.dataframe(df)
+
+    # --- 5. SEARCH ---
+    st.divider()
+    q = st.chat_input("Search for specific keywords...")
+    if q:
+        res = df[df.apply(lambda r: r.astype(str).str.lower().str.contains(q.lower()).any(), axis=1)]
+        st.dataframe(res)
 else:
-    st.error("No data found.")
+    st.error("Sheet connection failed.")
