@@ -6,7 +6,7 @@ st.set_page_config(page_title="2026 OKR Dashboard", layout="wide")
 st.title("🚀 2026 Strategy AI Dashboard")
 
 # 2. Connect to Google Sheets (using the link we published)
-url = "YOUR_PUBLISHED_CSV_URL_HERE"
+url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR6yoAToWo8pkVEqypvSIISiZWTScO04siyppf_oTxZYgr_TWmD3V1h2mNnfHZHlY6x1WcEEqPkzvGW/pubhtml"
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(spreadsheet=url, ttl="1h") # Caches for 1 hour to stay fast
 
