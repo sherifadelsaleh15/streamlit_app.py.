@@ -8,19 +8,18 @@ st.set_page_config(page_title="2026 Strategy Command", layout="wide")
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #f9fbff; }
-    
-    .okr-card {
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+    .metric-card {
         background: white; border: 1px solid #e2e8f0; padding: 24px;
-        border-radius: 16px; margin-bottom: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        border-radius: 12px; margin-bottom: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    .metric-title { font-size: 1.3rem; font-weight: 700; color: #1e293b; margin-bottom: 2px; }
-    .type-subtitle { font-size: 0.85rem; color: #3b82f6; text-transform: uppercase; font-weight: 700; }
+    .metric-label { font-size: 1.25rem; font-weight: 700; color: #1e293b; }
+    .source-tag { font-size: 0.7rem; color: #64748b; text-transform: uppercase; font-weight: 600; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE (STRICT SANITIZATION) ---
+# --- 2. DATA ENGINE (THE FIX) ---
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
 @st.cache_data(ttl=60)
@@ -41,123 +40,109 @@ def load_and_normalize_all():
         encoded_name = urllib.parse.quote(tab)
         url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
         try:
-            # Load raw
-            df = pd.read_csv(url)
+            # 1. Load and immediately drop empty rows/columns
+            df = pd.read_csv(url).dropna(how='all').dropna(axis=1, how='all')
             
-            # --- CRITICAL FIX FOR INVALIDINDEXERROR ---
-            # 1. Clean whitespace from headers
+            # 2. THE NUCLEAR FIX: Reset the index and dedup columns immediately
+            df = df.reset_index(drop=True)
             df.columns = [str(c).strip() for c in df.columns]
-            # 2. Force unique columns (renames 'Value' to 'Value.1' if it appears twice)
-            df.columns = pd.io.common.dedup_names(df.columns, is_unique=False)
-            # 3. Drop completely empty rows and reset index
-            df = df.dropna(how='all').reset_index(drop=True)
             
-            # Rename based on mapping
+            # If columns are still duplicated, force them to be unique (e.g., 'Views', 'Views.1')
+            if not df.columns.is_unique:
+                new_cols = []
+                counts = {}
+                for col in df.columns:
+                    counts[col] = counts.get(col, 0) + 1
+                    new_cols.append(f"{col}_{counts[col]}" if counts[col] > 1 else col)
+                df.columns = new_cols
+
             df = df.rename(columns=mapping)
             
-            # Identify numeric columns
-            value_vars = ['Value', 'Views', 'Active Users', 'Clicks', 'Avg Position', 'Followers']
-            found_vars = [c for c in df.columns if c in value_vars]
+            # 3. Numeric Extraction
+            val_vars = ['Value', 'Views', 'Active Users', 'Clicks', 'Avg Position', 'Followers']
+            found_vars = [c for c in df.columns if c in val_vars]
 
             for v_col in found_vars:
                 temp = df.copy()
-                temp['Metric_Type'] = v_col
-                temp['Actual_Value'] = pd.to_numeric(temp[v_col], errors='coerce').fillna(0)
-                temp['Source_Tab'] = tab
+                temp['Metric_Source'] = v_col
+                temp['Final_Value'] = pd.to_numeric(temp[v_col], errors='coerce').fillna(0)
+                temp['Origin_Sheet'] = tab
                 
-                # Standardize Month
                 if 'Date_Month' in temp.columns:
                     temp['Date_Month'] = pd.to_datetime(temp['Date_Month'], errors='coerce').dt.strftime('%b %Y')
                 
-                # Filter to only unified schema to avoid concat index collisions
-                final_cols = ['Objective', 'Region', 'OKR_Label', 'Metric_Type', 'Date_Month', 'Actual_Value', 'Source_Tab']
-                available = [c for c in final_cols if c in temp.columns]
+                # Use ONLY the standardized columns to avoid index/column alignment issues during concat
+                cols_to_keep = ['Objective', 'Region', 'OKR_Label', 'Metric_Source', 'Date_Month', 'Final_Value', 'Origin_Sheet']
+                temp = temp[[c for c in cols_to_keep if c in temp.columns]]
                 
-                # Drop any remaining duplicated indices in the temp object
-                temp = temp[available].loc[:, ~temp[available].columns.duplicated()]
-                all_data.append(temp)
-        except:
+                # FINAL SAFETY: Reset index again for this chunk
+                all_data.append(temp.reset_index(drop=True))
+        except Exception:
             continue
 
     if not all_data: return pd.DataFrame()
     
-    # Final Concatenation with forced alignment
-    return pd.concat(all_data, axis=0, ignore_index=True, sort=False)
+    # 4. CONCAT WITH IGNORE_INDEX
+    # This ignores the row labels of the individual dataframes and builds a new 0...N index
+    return pd.concat(all_data, ignore_index=True, sort=False)
 
-# --- 3. DASHBOARD LOGIC ---
+# --- 3. UI & FILTERS ---
 master_df = load_and_normalize_all()
 
 if not master_df.empty:
-    st.title("2026 Strategy & OKR Dashboard")
+    st.title("2026 Strategy Performance Dashboard")
 
-    # Chronological sorting reference
-    month_order = ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 
-                   'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026', 'Dec 2026']
-    present_months = [m for m in month_order if m in master_df['Date_Month'].unique()]
-
-    # FILTRATION SIDEBAR
     with st.sidebar:
-        st.header("Filtration Panel")
-        sel_months = st.multiselect("Filtration of Month", present_months, default=present_months)
+        st.header("Global Filtration")
         
-        reg_opts = sorted(master_df['Region'].unique().astype(str).tolist()) if 'Region' in master_df.columns else []
-        sel_regions = st.multiselect("Filtration of Region", reg_opts, default=reg_opts)
+        # Chronological Month Sort
+        month_order = ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 
+                       'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026', 'Dec 2026']
+        avail_months = [m for m in month_order if m in master_df['Date_Month'].unique()]
+        sel_months = st.multiselect("Filtration of Month", avail_months, default=avail_months)
+        
+        regions = sorted(master_df['Region'].unique().astype(str).tolist()) if 'Region' in master_df.columns else []
+        sel_regions = st.multiselect("Filtration of Region", regions, default=regions)
 
-    # TAB SELECTOR
-    tab_names = ["All Performance"] + sorted(master_df['Source_Tab'].unique().tolist())
-    dashboard_tabs = st.tabs(tab_names)
+    # UI TABS
+    tabs_list = ["All Data"] + sorted(master_df['Origin_Sheet'].unique().tolist())
+    st_tabs = st.tabs(tabs_list)
 
-    for i, t_name in enumerate(tab_names):
-        with dashboard_tabs[i]:
-            # Apply Filters
+    for i, tab_name in enumerate(tabs_list):
+        with st_tabs[i]:
             f_df = master_df.copy()
-            if t_name != "All Performance":
-                f_df = f_df[f_df['Source_Tab'] == t_name]
+            if tab_name != "All Data":
+                f_df = f_df[f_df['Origin_Sheet'] == tab_name]
             
             f_df = f_df[f_df['Date_Month'].isin(sel_months)]
             if 'Region' in f_df.columns:
                 f_df = f_df[f_df['Region'].isin(sel_regions)]
 
             if f_df.empty:
-                st.info("No matching data for these filters.")
+                st.info("No data found for current filters.")
                 continue
 
-            # --- 4. RENDER BY OBJECTIVE ---
-            objectives = f_df['Objective'].unique() if 'Objective' in f_df.columns else ["General"]
-            
-            for obj in objectives:
+            # Display logic
+            objs = f_df['Objective'].unique() if 'Objective' in f_df.columns else ["Uncategorized"]
+            for obj in objs:
                 st.markdown(f"### {obj}")
-                obj_data = f_df[f_df['Objective'] == obj] if 'Objective' in f_df.columns else f_df
+                obj_subset = f_df[f_df['Objective'] == obj] if 'Objective' in f_df.columns else f_df
                 
-                # Group by OKR Label + Metric Type (e.g., "Homepage" + "Views")
-                groups = obj_data.groupby(['OKR_Label', 'Metric_Type'])
-                
-                for (okr_name, m_type), m_df in groups:
+                metrics = obj_subset.groupby(['OKR_Label', 'Metric_Source'])
+                for (label, m_type), m_df in metrics:
                     with st.container():
-                        st.markdown('<div class="okr-card">', unsafe_allow_html=True)
-                        st.markdown(f'<div class="type-subtitle">{m_type}</div>', unsafe_allow_html=True)
-                        st.markdown(f'<div class="metric-title">{okr_name}</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                        st.markdown(f'<div class="source-tag">{m_type}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="metric-label">{label}</div>', unsafe_allow_html=True)
                         
-                        c_chart, c_data = st.columns([3, 1])
-                        
-                        with c_chart:
-                            # Time-sorting for chart
-                            m_df['sort_key'] = pd.to_datetime(m_df['Date_Month'], format='%b %Y')
-                            m_df = m_df.sort_values('sort_key')
-                            st.area_chart(m_df, x='Date_Month', y='Actual_Value', color="#1e293b")
-                        
-                        with c_data:
-                            st.metric("Total", f"{m_df['Actual_Value'].sum():,.0f}")
-                            st.dataframe(m_df[['Date_Month', 'Actual_Value']], hide_index=True)
-                        
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            m_df['dt'] = pd.to_datetime(m_df['Date_Month'], format='%b %Y')
+                            m_df = m_df.sort_values('dt')
+                            st.area_chart(m_df, x='Date_Month', y='Final_Value', color="#1e293b")
+                        with col2:
+                            st.metric("Total", f"{m_df['Final_Value'].sum():,.0f}")
+                            st.dataframe(m_df[['Date_Month', 'Final_Value']], hide_index=True)
                         st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- 5. AI CHAT ---
-    st.divider()
-    query = st.chat_input("Search metrics or ask a question...")
-    if query:
-        res = master_df[master_df.apply(lambda r: r.astype(str).str.lower().str.contains(query.lower()).any(), axis=1)]
-        st.write(f"Results for '{query}':")
-        st.dataframe(res)
 else:
-    st.error("Data synchronization failed. Verify column headers in all sheet tabs.")
+    st.error("Connection failed. Check Google Sheets headers for duplicate names or empty columns.")
