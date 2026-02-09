@@ -1,17 +1,28 @@
 import streamlit as st
 import pandas as pd
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="2026 Strategy Command Center", layout="wide")
+# --- 1. SET THEME & PAGE CONFIG ---
+st.set_page_config(page_title="2026 Strategy Command", layout="wide")
 
-# --- DATA ENGINE (Multi-Tab Support) ---
-# Replace this ID with your Master Sheet ID
+# Custom CSS for a "Premium" look
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; background-color: #fcfcfd; }
+    .stMetric { background-color: white; border: 1px solid #f0f0f1; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .stDataFrame { border-radius: 12px; overflow: hidden; }
+    .main-header { font-size: 32px; font-weight: 700; color: #111827; margin-bottom: 5px; }
+    .sub-header { color: #6b7280; font-size: 16px; margin-bottom: 30px; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 2. MULTI-TAB DATA ENGINE ---
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
-@st.cache_data(ttl=60)
-def load_tab(sheet_name):
-    # This URL format allows us to target specific tabs by name
-    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
+@st.cache_data(ttl=300)
+def fetch_data(tab_name):
+    # This URL format is the key to accessing different tabs
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={tab_name}"
     try:
         data = pd.read_csv(url)
         data.columns = [c.strip() for c in data.columns]
@@ -19,75 +30,79 @@ def load_tab(sheet_name):
     except:
         return pd.DataFrame()
 
-# --- HEADER & NAVIGATION ---
-st.title("🚀 2026 Global Strategy Dashboard")
+# --- 3. NAVIGATION & TABS ---
+st.markdown('<p class="main-header">🚀 Strategy AI Command Center</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">2026 Performance Monitoring & Deep Analysis</p>', unsafe_allow_html=True)
 
-# 1. SELECT DATA SOURCE (This targets your Google Sheet Tabs)
-# Make sure these names match your Tab names in Google Sheets exactly!
-source = st.selectbox(
-    "📂 Select Data Source", 
-    ["OKR_Master", "Social_Media", "Top_Pages", "Keywords"]
-)
+# Define your tab names EXACTLY as they appear in Google Sheets
+available_tabs = ["MASTER_FEED", "Social_Media", "Top_Pages", "Keywords"] 
+selected_tab = st.tabs(available_tabs)
 
-df = load_tab(source)
-
-if not df.empty:
-    # --- DYNAMIC FILTERS ---
-    # This automatically creates filters based on the columns in the selected tab
-    st.sidebar.header(f"🔍 {source} Filters")
-    
-    filtered_df = df.copy()
-    
-    # Auto-generate multiselect filters for columns like 'Region', 'Category', 'Month'
-    for col in df.columns:
-        if col not in ['Value', 'Date', 'Impressions', 'Clicks']: # Don't filter by the numbers
-            unique_vals = df[col].unique()
-            selected = st.sidebar.multiselect(f"Filter {col}", options=unique_vals, default=unique_vals)
-            filtered_df = filtered_df[filtered_df[col].isin(selected)]
-
-    # --- KPI CARDS ---
-    # We find the first numeric column to sum up
-    nums = filtered_df.select_dtypes(include=['number']).columns
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if len(nums) > 0:
-            st.metric(f"Total {nums[0]}", f"{filtered_df[nums[0]].sum():,.0f}")
-    with c2:
-        st.metric("Entries", len(filtered_df))
-    with c3:
-        st.metric("Source Status", "Active", delta="Synced")
-
-    # --- DASHBOARD VISUALS ---
-    tab_view, tab_chart = st.tabs(["📊 Visualization", "📋 Data Table"])
-    
-    with tab_view:
-        if len(nums) > 0:
-            # If there's a 'Month' column, use it for the X-axis
-            x_axis = 'Month' if 'Month' in filtered_df.columns else filtered_df.columns[0]
-            st.subheader(f"{nums[0]} Trend")
-            st.bar_chart(filtered_df, x=x_axis, y=nums[0])
-        else:
-            st.info("No numeric data available for charting in this tab.")
-
-    with tab_chart:
-        st.dataframe(filtered_df, use_container_width=True)
-
-    # --- SMART SEARCH ---
-    st.divider()
-    st.subheader("💬 Search across this data")
-    user_input = st.chat_input(f"Search {source}...")
-
-    if user_input:
-        keywords = user_input.lower().split()
-        search_results = df.copy()
-        for word in keywords:
-            search_results = search_results[search_results.apply(lambda row: row.astype(str).str.lower().str.contains(word).any(), axis=1)]
+# --- 4. LOOP THROUGH TABS ---
+for i, tab_name in enumerate(available_tabs):
+    with selected_tab[i]:
+        df = fetch_data(tab_name)
         
-        if not search_results.empty:
-            st.write(f"Results for '{user_input}':")
-            st.dataframe(search_results)
-        else:
-            st.warning("No matches found in this specific tab.")
+        if not df.empty:
+            # --- FILTRATION BAR ---
+            st.markdown("### 🔍 Smart Filters")
+            cols = st.columns(min(len(df.columns), 4))
+            filtered_df = df.copy()
+            
+            # Create dynamic filters based on column names
+            for idx, col in enumerate(df.columns[:4]): # Limit to first 4 for layout
+                if df[col].dtype == 'object':
+                    with cols[idx]:
+                        pick = st.multiselect(f"Select {col}", options=df[col].unique(), default=df[col].unique())
+                        filtered_df = filtered_df[filtered_df[col].isin(pick)]
 
-else:
-    st.error(f"Could not find data in the tab named '{source}'. Check your Google Sheet tab names.")
+            # --- KEY PERFORMANCE INDICATORS ---
+            st.markdown("---")
+            m1, m2, m3, m4 = st.columns(4)
+            
+            # Auto-detect a numeric column for the metric
+            numeric_cols = filtered_df.select_dtypes(include=['number']).columns
+            target_col = numeric_cols[0] if not numeric_cols.empty else None
+
+            with m1:
+                total = filtered_df[target_col].sum() if target_col else len(filtered_df)
+                st.metric(label=f"Total {target_col if target_col else 'Rows'}", value=f"{total:,.0f}")
+            with m2:
+                st.metric(label="Unique Segments", value=len(filtered_df.iloc[:, 0].unique()))
+            with m3:
+                st.metric(label="Data Recency", value="Live")
+            with m4:
+                st.metric(label="Status", value="Healthy", delta="OK")
+
+            # --- VISUALIZATION ---
+            st.markdown("### 📊 Analytics Overview")
+            v1, v2 = st.columns([2, 1])
+            
+            with v1:
+                if target_col and 'Month' in filtered_df.columns:
+                    st.area_chart(filtered_df, x='Month', y=target_col)
+                else:
+                    st.bar_chart(filtered_df.iloc[:, :2])
+            
+            with v2:
+                st.write("Top 5 Performance")
+                st.dataframe(filtered_df.head(5), use_container_width=True)
+
+            # --- THE AI ANALYST ---
+            st.markdown("---")
+            st.markdown("### 🤖 Chat with this Dataset")
+            user_q = st.chat_input(f"Ask about {tab_name}...", key=f"chat_{tab_name}")
+            
+            if user_q:
+                with st.chat_message("assistant"):
+                    # Smarter Search Logic
+                    q = user_q.lower()
+                    results = df[df.apply(lambda row: row.astype(str).str.lower().str.contains(q).any(), axis=1)]
+                    if not results.empty:
+                        st.write(f"Based on the **{tab_name}** data, I found:")
+                        st.dataframe(results)
+                    else:
+                        st.write("I couldn't find a direct match. Try searching for a specific keyword or value.")
+
+        else:
+            st.info(f"Tab '{tab_name}' not found or empty. Ensure tab names match your Google Sheet exactly.")
