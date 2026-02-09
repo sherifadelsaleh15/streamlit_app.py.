@@ -1,32 +1,28 @@
 import streamlit as st
 import pandas as pd
 import urllib.parse
-from datetime import datetime
 
-# --- 1. SETTINGS & PREMIUM UI ---
-st.set_page_config(page_title="2026 Strategy Command", layout="wide", page_icon="📈")
+# --- 1. SETTINGS & UI ---
+st.set_page_config(page_title="2026 Strategy Command", layout="wide")
 
+# Custom CSS to make filters easier to click
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #fcfcfd; }
-    
-    /* Elegant Metric Cards */
-    div[data-testid="stMetric"] {
-        background-color: white; border: 1px solid #f0f2f6; padding: 20px; border-radius: 16px;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05);
+    .stMultiSelect div[data-baseweb="select"] {
+        background-color: white;
+        border-radius: 8px;
     }
-    
-    /* Chart Container Styling */
-    .chart-container {
-        background-color: white; border: 1px solid #f0f2f6; padding: 25px;
-        border-radius: 20px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+    .chart-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid #e2e8f0;
+        margin-bottom: 20px;
     }
-    .chart-title { color: #1e293b; font-size: 20px; font-weight: 700; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA ENGINE ---
+# --- 2. THE DATA ENGINE ---
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
 @st.cache_data(ttl=60)
@@ -35,87 +31,86 @@ def fetch_and_clean(tab_name):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
     try:
         df = pd.read_csv(url)
-        df.columns = [c.strip() for c in df.columns]
+        # CRITICAL: Strip spaces from headers AND data
+        df.columns = [str(c).strip() for c in df.columns]
+        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         
         # Unified Mapping
-        mapping = {'Month': 'Month', 'Date_Month': 'Month', 'Region/Country': 'Region', 'Metric Name': 'Metric'}
+        mapping = {
+            'Month': 'Month', 'Date_Month': 'Month', 'Date Month': 'Month',
+            'Region/Country': 'Region', 'Region': 'Region',
+            'Metric Name': 'Metric', 'Metric_Name': 'Metric'
+        }
         df = df.rename(columns=mapping)
         
-        # Clean numeric data
         if 'Value' in df.columns:
             df['Value'] = pd.to_numeric(df['Value'], errors='coerce').fillna(0)
-            
         return df
     except:
         return pd.DataFrame()
 
-# --- 3. GLOBAL FILTRATION & LOGIC ---
-st.title("🚀 2026 Strategy Command Center")
+# --- 3. SELECTION & FILTRATION ---
+st.title("🚀 2026 Strategy Command")
 
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
-selected_tab = st.selectbox("📂 Select Intelligence Layer", tabs)
+selected_tab = st.sidebar.selectbox("📂 Data Source", tabs)
 
 df = fetch_and_clean(selected_tab)
 
 if not df.empty:
-    with st.sidebar:
-        st.header("🎛️ Control Panel")
-        
-        # A. MONTH FILTER (Plan Step 3)
-        if 'Month' in df.columns:
-            # Sort months chronologically
-            month_order = ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026', 
-                           'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026', 'Dec 2026']
-            existing_months = [m for m in month_order if m in df['Month'].unique()]
-            sel_months = st.multiselect("Select Months", options=existing_months, default=existing_months)
-            df = df[df['Month'].isin(sel_months)]
+    # Sidebar Filters
+    st.sidebar.header("🎛️ Filters")
+    
+    # 1. Month Filter
+    if 'Month' in df.columns:
+        month_list = sorted(df['Month'].unique().tolist())
+        # We use a unique KEY to prevent the filter from breaking on refresh
+        sel_months = st.sidebar.multiselect("Select Month", options=month_list, default=month_list, key=f"month_{selected_tab}")
+    else:
+        sel_months = []
 
-        # B. OTHER FILTERS
-        f_cols = [c for c in ['Region', 'Metric', 'Objective ID', 'Source'] if c in df.columns]
-        for col in f_cols:
-            opts = sorted(df[col].unique().tolist())
-            sel = st.multiselect(f"Select {col}", options=opts, default=opts)
-            df = df[df[col].isin(sel)]
+    # 2. Region Filter
+    if 'Region' in df.columns:
+        region_list = sorted(df['Region'].unique().tolist())
+        sel_regions = st.sidebar.multiselect("Select Region", options=region_list, default=region_list, key=f"reg_{selected_tab}")
+    else:
+        sel_regions = []
 
-    # --- 4. VISUAL DASHBOARD ---
-    # Top Level KPI Row
-    k1, k2, k3 = st.columns(3)
-    with k1:
-        total = df['Value'].sum() if 'Value' in df.columns else len(df)
-        st.metric("Aggregate Performance", f"{total:,.0f}")
-    with k2:
-        st.metric("Data Dimensions", len(df.columns))
-    with k3:
-        st.metric("Status", "Live Sync", delta="100%")
+    # APPLY FILTERS
+    filtered_df = df.copy()
+    if sel_months:
+        filtered_df = filtered_df[filtered_df['Month'].isin(sel_months)]
+    if sel_regions:
+        filtered_df = filtered_df[filtered_df['Region'].isin(sel_regions)]
+
+    # --- 4. DISPLAY ---
+    # Metric Cards
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric("Total Value", f"{filtered_df['Value'].sum() if 'Value' in filtered_df.columns else 0:,.0f}")
+    with m2:
+        st.metric("Visible Rows", len(filtered_df))
+    with m3:
+        st.metric("Status", "Filtered" if len(filtered_df) < len(df) else "All Data")
 
     st.divider()
 
-    # --- 5. ENHANCED CHARTING ---
-    # If the sheet has an OKR_ID or Metric, we split into "Small Multiples"
-    split_col = next((c for c in ['OKR_ID', 'Metric', 'Objective ID'] if c in df.columns), None)
+    # Dynamic OKR Charts
+    id_col = next((c for c in ['OKR_ID', 'Metric', 'Objective ID'] if c in filtered_df.columns), None)
     
-    if split_col and 'Month' in df.columns:
-        unique_items = df[split_col].unique()
-        
-        for item in unique_items:
-            item_data = df[df[split_col] == item].copy()
+    if id_col and not filtered_df.empty:
+        for item in filtered_df[id_col].unique():
+            item_data = filtered_df[filtered_df[id_col] == item]
             
-            # Use a container for the "Card" look
-            st.markdown(f"""<div class="chart-container">
-                            <div class="chart-title">📊 {item}</div>""", unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="chart-card"><h4>📈 {item}</h4>', unsafe_allow_html=True)
             c_left, c_right = st.columns([2, 1])
             with c_left:
-                # Custom dark-theme Area Chart
-                st.area_chart(item_data, x='Month', y='Value', color="#1e293b")
+                st.area_chart(item_data, x='Month' if 'Month' in item_data.columns else None, y='Value', color="#1e293b")
             with c_right:
-                st.dataframe(item_data[['Month', 'Value']].sort_values('Month'), hide_index=True, use_container_width=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+                st.dataframe(item_data[['Month', 'Value', 'Region']] if 'Region' in item_data.columns else item_data, hide_index=True)
+            st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.subheader("General Trend")
-        st.area_chart(df, x='Month' if 'Month' in df.columns else None, y='Value' if 'Value' in df.columns else None)
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(filtered_df, use_container_width=True)
 
 else:
-    st.info("Check your Google Sheet tab names or sharing settings.")
+    st.error("Data could not be loaded. Check your Google Sheet Tab names.")
