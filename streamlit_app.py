@@ -1,72 +1,81 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="2026 Strategy Dashboard", layout="wide")
-st.title("🚀 2026 Strategy AI Dashboard")
+st.set_page_config(page_title="2026 Strategy AI", layout="wide", initial_sidebar_state="expanded")
 
-# 1. YOUR NEW SHEET ID LINK (Direct Export)
-# Sheet ID extracted from your URL: 1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY
+# --- STYLING ---
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_value=True)
+
+# 1. DATA ENGINE
 url = "https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/export?format=csv"
 
-@st.cache_data(ttl=300) # Refresh data every 5 minutes
-def load_data(sheets_url):
-    data = pd.read_csv(sheets_url)
-    
-    # --- AUTO-FIX COLUMN NAMES ---
-    # This maps your sheet's column names to standard names the dashboard uses
-    mapping = {
-        'Month ': 'Date_Month', # Added a space because sometimes sheets have trailing spaces
-        'Month': 'Date_Month',
-        'Region/Country': 'Region',
-        'Metric Name': 'Metric_Name',
-        'Objective ID': 'Objective_ID',
-        'Value': 'Value'
-    }
-    data = data.rename(columns=mapping)
-    return data
+@st.cache_data(ttl=300)
+def load_data():
+    df = pd.read_csv(url)
+    df.columns = [c.strip() for c in df.columns] # Clean hidden spaces
+    mapping = {'Month': 'Date_Month', 'Region/Country': 'Region', 'Metric Name': 'Metric'}
+    return df.rename(columns=mapping)
 
-try:
-    df = load_data(url)
-    
-    # 2. Sidebar Filters
-    st.sidebar.header("Filter Analytics")
-    
-    # Filter by Region
-    if "Region" in df.columns:
-        region_list = df["Region"].unique()
-        selected_regions = st.sidebar.multiselect("Select Region", options=region_list, default=region_list)
-        df = df[df["Region"].isin(selected_regions)]
+df = load_data()
 
-    # Filter by Metric
-    if "Metric_Name" in df.columns:
-        metrics = df["Metric_Name"].unique()
-        selected_metrics = st.sidebar.multiselect("Select Metrics", options=metrics, default=metrics)
-        df = df[df["Metric_Name"].isin(selected_metrics)]
+# 2. HEADER & KPI CARDS
+st.title("📈 2026 Strategy Command Center")
+st.caption("Real-time OKR Tracking & AI Analysis")
 
-    # 3. Main Dashboard Display
-    st.subheader("📊 Data Overview")
-    st.dataframe(df, use_container_width=True)
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Value", f"{pd.to_numeric(df['Value'], errors='coerce').sum():,.0f}")
+with col2:
+    st.metric("Regions Active", len(df['Region'].unique()))
+with col3:
+    st.metric("Current Month", df['Date_Month'].iloc[-1] if not df.empty else "N/A")
+with col4:
+    st.metric("Status", "Online", delta="Healthy")
 
-    # 4. Charting Logic
-    # Note: Ensure the "Month" column in your sheet contains dates or text like "January"
-    if "Date_Month" in df.columns and "Value" in df.columns:
-        st.subheader("📈 Performance Trend")
-        
-        # Clean the 'Value' column to make sure it's a number
-        df["Value"] = pd.to_numeric(df["Value"], errors='coerce')
-        
-        # Create the chart
-        st.line_chart(df, x="Date_Month", y="Value")
-    else:
-        st.warning("Ensure your sheet has 'Month' and 'Value' columns filled with data.")
-
-except Exception as e:
-    st.error(f"Dashboard Error: {e}")
-    st.info("Make sure your Google Sheet is shared as 'Anyone with the link can view'.")
-
-# 5. AI Interaction
 st.divider()
-st.subheader("💬 Chat with your Data")
-user_question = st.chat_input("Ask about Objective 1 performance...")
-if user_question:
-    st.write(f"Assistant: Looking into '{user_question}' for you...")
+
+# 3. SIDEBAR FILTERS
+with st.sidebar:
+    st.header("🎛️ Control Panel")
+    selected_region = st.multiselect("Target Region", options=df['Region'].unique(), default=df['Region'].unique())
+    selected_metric = st.selectbox("Select KPI", options=df['Metric'].unique())
+
+# Filter Data
+filtered_df = df[(df['Region'].isin(selected_region)) & (df['Metric'] == selected_metric)]
+
+# 4. VISUALS SECTION
+view_col, chart_col = st.columns([1, 1])
+
+with view_col:
+    st.subheader("📋 Raw Intelligence")
+    st.dataframe(filtered_df, use_container_width=True, height=400)
+
+with chart_col:
+    st.subheader("📊 Growth Trend")
+    if not filtered_df.empty:
+        st.line_chart(filtered_df, x="Date_Month", y="Value", color="#FF4B4B")
+
+# 5. THE AI CHAT ENGINE (Functional)
+st.divider()
+st.subheader("🤖 AI Data Consultant")
+prompt = st.chat_input("Ask me to 'Show Germany' or 'Show February'...")
+
+if prompt:
+    with st.chat_message("user"):
+        st.write(prompt)
+    
+    with st.chat_message("assistant"):
+        # Simple Logic: AI searches the dataframe for your keywords
+        search_term = prompt.title()
+        ai_results = df[df.apply(lambda row: row.astype(str).str.contains(search_term).any(), axis=1)]
+        
+        if not ai_results.empty:
+            st.write(f"I found {len(ai_results)} records related to '{prompt}':")
+            st.dataframe(ai_results)
+        else:
+            st.write(f"I analyzed the 2026 dataset but couldn't find a direct match for '{prompt}'. Try asking for a specific Region or Month.")
