@@ -15,18 +15,16 @@ st.markdown("""
         color: #1e293b;
     }
     
-    /* Objective Section Header */
     .obj-section-header {
-        font-size: 1.5rem;
+        font-size: 1.6rem;
         font-weight: 700;
-        color: #1e293b;
+        color: #0f172a;
         margin-top: 40px;
         margin-bottom: 20px;
-        padding-bottom: 10px;
-        border-bottom: 2px solid #cbd5e1;
+        padding-left: 10px;
+        border-left: 6px solid #3b82f6;
     }
     
-    /* Card Design */
     .metric-card {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
@@ -36,26 +34,24 @@ st.markdown("""
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
     
-    /* Typography inside Card */
-    .card-okr-title {
-        font-size: 1.1rem;
+    .card-metric-name {
+        font-size: 1.3rem;
         font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 4px;
+        color: #2563eb;
+        margin-bottom: 2px;
     }
+
     .card-obj-subtitle {
-        font-size: 0.85rem;
-        font-weight: 500;
+        font-size: 0.9rem;
+        font-weight: 600;
         color: #64748b;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
     }
-    .stat-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #3b82f6;
-    }
+
+    .stat-label { font-size: 0.8rem; font-weight: 600; color: #94a3b8; }
+    .stat-value { font-size: 2.2rem; font-weight: 700; color: #0f172a; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -70,19 +66,16 @@ def fetch_data(tab_name):
         df = pd.read_csv(url)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Unified Schema Mapping
+        # Mapping to find Metric Name and Objective
         mapping = {
             'Month': 'Month', 'Date_Month': 'Month', 'Date Month': 'Month',
             'Region/Country': 'Region', 'Region': 'Region',
             'Objective ID': 'Objective', 'Objective_ID': 'Objective',
-            # Map various columns to 'OKR_Name'
-            'Metric Name': 'OKR_Name', 'OKR_ID': 'OKR_Name', 'Metric_Name': 'OKR_Name',
-            'Page Path': 'OKR_Name', 'Query': 'OKR_Name',
-            'Social Network': 'OKR_Name', 'Channel': 'OKR_Name'
+            'Metric Name': 'Metric_Name', 'Metric_Name': 'Metric_Name', 
+            'OKR_ID': 'Metric_Name', 'Page Path': 'Metric_Name', 
+            'Query': 'Metric_Name', 'Social Network': 'Metric_Name'
         }
         df = df.rename(columns=mapping)
-        
-        # Fix Duplicate Columns (Crucial for preventing crashes)
         df = df.loc[:, ~df.columns.duplicated()]
         
         if 'Value' in df.columns:
@@ -93,101 +86,63 @@ def fetch_data(tab_name):
         return pd.DataFrame()
 
 # --- 3. NAVIGATION ---
-st.sidebar.header("NAVIGATOR")
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
-selected_tab = st.sidebar.radio("Select Source", tabs)
-
+selected_tab = st.sidebar.selectbox("Data Layer", tabs)
 df = fetch_data(selected_tab)
 
-# --- 4. DASHBOARD LOGIC ---
+# --- 4. DASHBOARD ---
 if not df.empty:
-    st.title(f"📊 {selected_tab.replace('_', ' ')}")
+    st.title(f"Performance Analysis: {selected_tab}")
     
-    # Filters
-    with st.expander("🔎 Filter Data", expanded=True):
+    # Global Filters
+    with st.expander("Filter Data", expanded=False):
         c1, c2 = st.columns(2)
         with c1:
-            months = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
-            sel_months = st.multiselect("Select Months", months, default=months, key=f"m_{selected_tab}")
+            m_list = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
+            sel_m = st.multiselect("Months", m_list, default=m_list)
         with c2:
-            regions = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
-            sel_regions = st.multiselect("Select Regions", regions, default=regions, key=f"r_{selected_tab}")
+            r_list = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
+            sel_r = st.multiselect("Regions", r_list, default=r_list)
 
-    # Apply Filters
     f_df = df.copy()
-    if sel_months and 'Month' in f_df.columns: f_df = f_df[f_df['Month'].isin(sel_months)]
-    if sel_regions and 'Region' in f_df.columns: f_df = f_df[f_df['Region'].isin(sel_regions)]
+    if sel_m and 'Month' in f_df.columns: f_df = f_df[f_df['Month'].isin(sel_m)]
+    if sel_r and 'Region' in f_df.columns: f_df = f_df[f_df['Region'].isin(sel_r)]
 
     # --- HIERARCHY RENDERER ---
-    
-    # 1. Detect Objective Column
     obj_col = 'Objective' if 'Objective' in f_df.columns else None
-    okr_col = 'OKR_Name' if 'OKR_Name' in f_df.columns else None
+    met_col = 'Metric_Name' if 'Metric_Name' in f_df.columns else None
     
-    # Fallback: If no Objective column, use a placeholder
-    if not obj_col and okr_col:
-        f_df['Objective'] = "General Objectives"
+    if not obj_col:
+        f_df['Objective'] = "Standard Objectives"
         obj_col = 'Objective'
 
-    if obj_col and okr_col and 'Value' in f_df.columns:
-        # Loop through Objectives
-        unique_objs = f_df[obj_col].unique()
-        
-        for obj in unique_objs:
-            # SECTION HEADER
-            st.markdown(f'<div class="obj-section-header">🚩 {obj}</div>', unsafe_allow_html=True)
+    if met_col and 'Value' in f_df.columns:
+        for obj in f_df[obj_col].unique():
+            st.markdown(f'<div class="obj-section-header">{obj}</div>', unsafe_allow_html=True)
             
-            # Get OKRs for this Objective
             obj_data = f_df[f_df[obj_col] == obj]
-            unique_okrs = obj_data[okr_col].unique()
-            
-            for okr in unique_okrs:
-                okr_data = obj_data[obj_data[okr_col] == okr]
-                
-                # Sort Chronologically
-                if 'Month' in okr_data.columns:
-                    okr_data = okr_data.sort_values('Month')
+            for metric in obj_data[met_col].unique():
+                m_subset = obj_data[obj_data[met_col] == metric]
+                if 'Month' in m_subset.columns: m_subset = m_subset.sort_values('Month')
 
-                # OKR CARD
+                # THE CARD
                 with st.container():
                     st.markdown('<div class="metric-card">', unsafe_allow_html=True)
                     
-                    # TITLE BLOCK: Objective + OKR Name
-                    st.markdown(f'<div class="card-okr-title">{okr}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div class="card-obj-subtitle">GOAL: {obj}</div>', unsafe_allow_html=True)
+                    # Explicit Metric Name and Objective Label
+                    st.markdown(f'<div class="card-metric-name">{metric}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="card-obj-subtitle">Objective: {obj}</div>', unsafe_allow_html=True)
                     
-                    c_chart, c_stat = st.columns([3, 1])
-                    
-                    with c_chart:
-                        # Area Chart
-                        st.area_chart(okr_data, x='Month' if 'Month' in okr_data.columns else None, y='Value', color="#3b82f6")
-                    
-                    with c_stat:
-                        total = okr_data['Value'].sum()
-                        st.markdown('<div class="card-obj-subtitle">TOTAL VALUE</div>', unsafe_allow_html=True)
+                    c_left, c_right = st.columns([3, 1])
+                    with c_left:
+                        st.area_chart(m_subset, x='Month' if 'Month' in m_subset.columns else None, y='Value', color="#2563eb")
+                    with c_right:
+                        total = m_subset['Value'].sum()
+                        st.markdown('<div class="stat-label">AGGREGATE VALUE</div>', unsafe_allow_html=True)
                         st.markdown(f'<div class="stat-value">{total:,.0f}</div>', unsafe_allow_html=True)
-                        st.dataframe(okr_data[['Month', 'Value']], hide_index=True, use_container_width=True, height=150)
-                    
+                        st.dataframe(m_subset[['Month', 'Value']], hide_index=True, use_container_width=True)
                     st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.warning("Data structure requires 'Objective' and 'Metric Name' columns.")
-        st.dataframe(f_df, use_container_width=True)
-
-    # --- 5. AI CHAT ---
-    st.markdown("---")
-    st.subheader("🤖 Strategy Assistant")
-    q = st.chat_input("Ask about any Objective or Result...")
-    if q:
-        with st.chat_message("assistant"):
-            words = q.lower().split()
-            res = df.copy()
-            for w in words:
-                res = res[res.apply(lambda r: r.astype(str).str.lower().str.contains(w).any(), axis=1)]
-            if not res.empty:
-                st.write(f"Found {len(res)} matching records:")
-                st.dataframe(res)
-            else:
-                st.write("No matches found.")
-
+        st.dataframe(f_df)
 else:
-    st.error("Unable to load data. Please check your Google Sheet tabs.")
+    st.error("No data found.")
