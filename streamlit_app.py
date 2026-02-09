@@ -2,115 +2,139 @@ import streamlit as st
 import pandas as pd
 import urllib.parse
 
-# --- 1. SETTINGS & UI ---
-st.set_page_config(page_title="2026 Strategy Command", layout="wide")
+# --- 1. CONFIGURATION & THEME ---
+st.set_page_config(page_title="2026 Strategy Dashboard", layout="wide")
 
-# Custom CSS to make filters easier to click
+# Custom CSS for a professional, high-contrast look
 st.markdown("""
     <style>
-    .stMultiSelect div[data-baseweb="select"] {
-        background-color: white;
-        border-radius: 8px;
-    }
-    .chart-card {
-        background-color: white;
-        padding: 20px;
-        border-radius: 15px;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; background-color: #ffffff; }
+    
+    /* Executive Card Styling */
+    .okr-container {
         border: 1px solid #e2e8f0;
-        margin-bottom: 20px;
+        padding: 24px;
+        border-radius: 8px;
+        background-color: #ffffff;
+        margin-bottom: 32px;
     }
+    .okr-header {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 16px;
+        border-bottom: 2px solid #3b82f6;
+        display: inline-block;
+        padding-bottom: 4px;
+    }
+    /* Metric styling */
+    [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 700; color: #1e293b; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. THE DATA ENGINE ---
+# --- 2. DATA ENGINE ---
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
 @st.cache_data(ttl=60)
-def fetch_and_clean(tab_name):
+def fetch_data(tab_name):
     encoded_name = urllib.parse.quote(tab_name)
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
     try:
         df = pd.read_csv(url)
-        # CRITICAL: Strip spaces from headers AND data
         df.columns = [str(c).strip() for c in df.columns]
-        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         
-        # Unified Mapping
+        # Schema Normalization
         mapping = {
             'Month': 'Month', 'Date_Month': 'Month', 'Date Month': 'Month',
             'Region/Country': 'Region', 'Region': 'Region',
-            'Metric Name': 'Metric', 'Metric_Name': 'Metric'
+            'Metric Name': 'OKR_Name', 'OKR_ID': 'OKR_Name', 'Metric_Name': 'OKR_Name'
         }
         df = df.rename(columns=mapping)
         
         if 'Value' in df.columns:
             df['Value'] = pd.to_numeric(df['Value'], errors='coerce').fillna(0)
         return df
-    except:
+    except Exception:
         return pd.DataFrame()
 
-# --- 3. SELECTION & FILTRATION ---
-st.title("🚀 2026 Strategy Command")
-
+# --- 3. SIDEBAR NAVIGATION ---
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
-selected_tab = st.sidebar.selectbox("📂 Data Source", tabs)
+selected_tab = st.sidebar.selectbox("Data Source", tabs)
 
-df = fetch_and_clean(selected_tab)
+df = fetch_data(selected_tab)
 
+# --- 4. FILTRATION LOGIC ---
 if not df.empty:
-    # Sidebar Filters
-    st.sidebar.header("🎛️ Filters")
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Filter View")
     
-    # 1. Month Filter
-    if 'Month' in df.columns:
-        month_list = sorted(df['Month'].unique().tolist())
-        # We use a unique KEY to prevent the filter from breaking on refresh
-        sel_months = st.sidebar.multiselect("Select Month", options=month_list, default=month_list, key=f"month_{selected_tab}")
-    else:
-        sel_months = []
+    # Month Filter
+    months = sorted(df['Month'].unique().tolist()) if 'Month' in df.columns else []
+    sel_months = st.sidebar.multiselect("Months", options=months, default=months, key=f"m_{selected_tab}")
+    
+    # Region Filter
+    regions = sorted(df['Region'].unique().tolist()) if 'Region' in df.columns else []
+    sel_regions = st.sidebar.multiselect("Regions", options=regions, default=regions, key=f"r_{selected_tab}")
 
-    # 2. Region Filter
-    if 'Region' in df.columns:
-        region_list = sorted(df['Region'].unique().tolist())
-        sel_regions = st.sidebar.multiselect("Select Region", options=region_list, default=region_list, key=f"reg_{selected_tab}")
-    else:
-        sel_regions = []
-
-    # APPLY FILTERS
-    filtered_df = df.copy()
+    # Application of filters
+    f_df = df.copy()
     if sel_months:
-        filtered_df = filtered_df[filtered_df['Month'].isin(sel_months)]
+        f_df = f_df[f_df['Month'].isin(sel_months)]
     if sel_regions:
-        filtered_df = filtered_df[filtered_df['Region'].isin(sel_regions)]
+        f_df = f_df[f_df['Region'].isin(sel_regions)]
 
-    # --- 4. DISPLAY ---
-    # Metric Cards
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("Total Value", f"{filtered_df['Value'].sum() if 'Value' in filtered_df.columns else 0:,.0f}")
-    with m2:
-        st.metric("Visible Rows", len(filtered_df))
-    with m3:
-        st.metric("Status", "Filtered" if len(filtered_df) < len(df) else "All Data")
-
-    st.divider()
-
-    # Dynamic OKR Charts
-    id_col = next((c for c in ['OKR_ID', 'Metric', 'Objective ID'] if c in filtered_df.columns), None)
+    # --- 5. MAIN DASHBOARD ---
+    st.markdown(f"### {selected_tab.replace('_', ' ')} Performance")
     
-    if id_col and not filtered_df.empty:
-        for item in filtered_df[id_col].unique():
-            item_data = filtered_df[filtered_df[id_col] == item]
+    # OKR Charting Logic
+    id_col = 'OKR_Name' if 'OKR_Name' in f_df.columns else None
+    
+    if id_col and 'Value' in f_df.columns:
+        unique_okrs = f_df[id_col].unique()
+        
+        for okr in unique_okrs:
+            okr_subset = f_df[f_df[id_col] == okr]
             
-            st.markdown(f'<div class="chart-card"><h4>📈 {item}</h4>', unsafe_allow_html=True)
-            c_left, c_right = st.columns([2, 1])
-            with c_left:
-                st.area_chart(item_data, x='Month' if 'Month' in item_data.columns else None, y='Value', color="#1e293b")
-            with c_right:
-                st.dataframe(item_data[['Month', 'Value', 'Region']] if 'Region' in item_data.columns else item_data, hide_index=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            with st.container():
+                st.markdown(f'<div class="okr-container">', unsafe_allow_html=True)
+                st.markdown(f'<div class="okr-header">{okr}</div>', unsafe_allow_html=True)
+                
+                chart_col, data_col = st.columns([2.5, 1])
+                
+                with chart_col:
+                    # High-fidelity area chart
+                    st.area_chart(okr_subset, x='Month' if 'Month' in okr_subset.columns else None, y='Value', color="#0f172a")
+                
+                with data_col:
+                    total_val = okr_subset['Value'].sum()
+                    st.metric("Total Progress", f"{total_val:,.0f}")
+                    st.dataframe(okr_subset[['Month', 'Value', 'Region']] if 'Region' in okr_subset.columns else okr_subset[['Month', 'Value']], hide_index=True, use_container_width=True)
+                
+                st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.dataframe(filtered_df, use_container_width=True)
+        st.dataframe(f_df, use_container_width=True)
+
+    # --- 6. AI CHAT ASSISTANT ---
+    st.markdown("---")
+    st.markdown("### AI Data Assistant")
+    user_query = st.chat_input("Ask a question about this dataset...")
+    
+    if user_query:
+        with st.chat_message("assistant"):
+            # Search logic: filter for any rows matching keywords
+            keywords = user_query.lower().split()
+            search_results = df.copy()
+            for word in keywords:
+                search_results = search_results[search_results.apply(lambda row: row.astype(str).str.lower().str.contains(word).any(), axis=1)]
+            
+            if not search_results.empty:
+                st.write(f"I found {len(search_results)} matching records for '{user_query}':")
+                st.dataframe(search_results, use_container_width=True)
+                if 'Value' in search_results.columns:
+                    st.info(f"The combined value for these records is {search_results['Value'].sum():,.2f}")
+            else:
+                st.write("No matching data found. Please refine your keywords.")
 
 else:
-    st.error("Data could not be loaded. Check your Google Sheet Tab names.")
+    st.error("Data could not be retrieved. Please verify tab names and sharing settings.")
