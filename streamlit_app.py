@@ -9,7 +9,7 @@ st.title("🚀 2026 Strategy AI Dashboard")
 # 2. Your Converted Sheet Link (Machine Readable)
 # Your ID: 1WcEEqPkzvGW
 # Formatted for Streamlit connection:
-url = "https://docs.google.com/spreadsheets/d/1WcEEqPkzvGW/edit#gid=0"
+url = "https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/edit?usp=sharing"
 
 # 3. Connect using the library
 try:
