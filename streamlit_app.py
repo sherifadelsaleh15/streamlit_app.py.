@@ -2,51 +2,35 @@ import streamlit as st
 import pandas as pd
 import urllib.parse
 
-# --- 1. PREMIUM STYLING ---
-st.set_page_config(page_title="2026 Strategy Command", layout="wide", page_icon="🎯")
+# --- 1. PREMIUM STYLING & FONT ---
+st.set_page_config(page_title="2026 Strategy Command", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
     html, body, [class*="css"] {
-        font-family: 'Poppins', sans-serif;
-        background-color: #f8fafc;
+        font-family: 'Inter', sans-serif;
+        background-color: #ffffff;
     }
     
-    .obj-section-header {
-        font-size: 1.6rem;
+    /* Objective Section Header */
+    .objective-header {
+        font-size: 1.5rem;
         font-weight: 700;
         color: #0f172a;
         margin-top: 40px;
-        margin-bottom: 20px;
-        border-left: 6px solid #3b82f6;
-        padding-left: 15px;
-    }
-    
-    .metric-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 30px;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.04);
-    }
-    
-    .metric-name-header {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: #2563eb;
-        margin-bottom: 5px;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #e2e8f0;
     }
 
-    .objective-subtitle {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: #64748b;
-        text-transform: uppercase;
-        margin-bottom: 20px;
-        display: block;
+    /* Container for each OKR */
+    .okr-wrapper {
+        margin-bottom: 50px;
+        padding: 20px;
+        border: 1px solid #f1f5f9;
+        border-radius: 8px;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -60,11 +44,10 @@ def fetch_data(tab_name):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={encoded_name}"
     try:
         df = pd.read_csv(url)
-        # Clean headers only (no renaming yet)
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Ensure 'Value' is numeric
-        val_col = next((c for c in df.columns if c.lower() in ['value', 'views', 'clicks']), None)
+        # Determine Value Column
+        val_col = next((c for c in df.columns if c.lower() in ['value', 'views', 'clicks', 'active users']), None)
         if val_col:
             df[val_col] = pd.to_numeric(df[val_col], errors='coerce').fillna(0)
             
@@ -72,71 +55,69 @@ def fetch_data(tab_name):
     except:
         return pd.DataFrame(), None
 
-# --- 3. NAVIGATION ---
+# --- 3. SELECTION & FILTERING ---
 tabs = ["MASTER_FEED", "GA4_Data", "GA4_Top_Pages", "GSC", "SOCIAL_MEDIA"]
 selected_tab = st.sidebar.selectbox("Data Source", tabs)
 df, value_column = fetch_data(selected_tab)
 
-# --- 4. DASHBOARD RENDERER ---
 if not df.empty:
-    st.title(f"Strategic Review: {selected_tab.replace('_', ' ')}")
+    st.title(f"Strategic View: {selected_tab}")
 
-    # Identification of Key Columns
-    # We look for Objective and Metric/OKR names dynamically
+    # Identify dynamic columns
     obj_col = next((c for c in df.columns if 'objective' in c.lower()), None)
-    # The Metric Name is usually 'Metric Name', 'OKR_ID', 'Page Path', etc.
-    name_col = next((c for c in df.columns if any(x in c.lower() for x in ['metric', 'okr', 'path', 'query', 'network'])), None)
+    metric_col = next((c for c in df.columns if any(x in c.lower() for x in ['metric', 'okr', 'path', 'query', 'network'])), None)
+    month_col = next((c for c in df.columns if 'month' in c.lower()), None)
 
-    if name_col and value_column:
-        # Group by Objective if it exists
-        groups = df[obj_col].unique() if obj_col else ["General Metrics"]
+    # Sidebar Filter for Month
+    if month_col:
+        unique_months = sorted(df[month_col].unique().tolist())
+        sel_months = st.sidebar.multiselect("Filter Months", unique_months, default=unique_months)
+        df = df[df[month_col].isin(sel_months)]
+
+    # --- 4. HIERARCHICAL CHARTING ---
+    if metric_col and value_column:
+        # Group by Objective
+        objectives = df[obj_col].unique() if obj_col else ["General Metrics"]
         
-        for group in groups:
-            st.markdown(f'<div class="obj-section-header">{group}</div>', unsafe_allow_html=True)
+        for obj in objectives:
+            st.markdown(f'<div class="objective-header">{obj}</div>', unsafe_allow_html=True)
             
-            # Filter data for this group
-            group_df = df[df[obj_col] == group] if obj_col else df
-            
-            # Unique Metrics in this group
-            metrics = group_df[name_col].unique()
+            obj_df = df[df[obj_col] == obj] if obj_col else df
+            metrics = obj_df[metric_col].unique()
             
             for m_name in metrics:
-                m_data = group_df[group_df[name_col] == m_name]
-                
-                # Sort by Month
-                month_col = next((c for c in df.columns if 'month' in c.lower()), None)
+                m_data = obj_df[obj_df[metric_col] == m_name]
                 if month_col:
                     m_data = m_data.sort_values(month_col)
 
-                # RENDER CARD
                 with st.container():
-                    st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                    st.markdown('<div class="okr-wrapper">', unsafe_allow_html=True)
                     
-                    # THE FIX: Display the actual name from your spreadsheet column
-                    st.markdown(f'<div class="metric-name-header">{m_name}</div>', unsafe_allow_html=True)
-                    if obj_col:
-                        st.markdown(f'<span class="objective-subtitle">Objective: {group}</span>', unsafe_allow_html=True)
+                    chart_col, stat_col = st.columns([3, 1])
                     
-                    col_chart, col_data = st.columns([3, 1])
+                    with chart_col:
+                        # Metric Name explicitly at the top of the chart
+                        st.subheader(m_name)
+                        st.area_chart(
+                            m_data, 
+                            x=month_col, 
+                            y=value_column, 
+                            color="#0f172a", # High-contrast professional dark blue
+                            use_container_width=True
+                        )
                     
-                    with col_chart:
-                        st.area_chart(m_data, x=month_col, y=value_column, color="#2563eb")
-                    
-                    with col_data:
-                        total_val = m_data[value_column].sum()
-                        st.metric("Total Progress", f"{total_val:,.0f}")
+                    with stat_col:
+                        total = m_data[value_column].sum()
+                        st.metric("Total Value", f"{total:,.0f}")
                         st.dataframe(m_data[[month_col, value_column]], hide_index=True)
-                        
+                    
                     st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.warning("Could not automatically detect Metric or Value columns. Showing raw data.")
         st.dataframe(df)
 
-    # --- 5. SEARCH ---
-    st.divider()
-    q = st.chat_input("Search for specific keywords...")
-    if q:
-        res = df[df.apply(lambda r: r.astype(str).str.lower().str.contains(q.lower()).any(), axis=1)]
+    # --- 5. AI SEARCH ---
+    st.markdown("---")
+    query = st.chat_input("Ask a question about this data...")
+    if query:
+        res = df[df.apply(lambda r: r.astype(str).str.lower().str.contains(query.lower()).any(), axis=1)]
         st.dataframe(res)
-else:
-    st.error("Sheet connection failed.")
