@@ -1,1 +1,20 @@
+/* Custom styling for Metric cards */
+[data-testid="stMetric"] {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
 
+/* Custom header styling */
+.main-title {
+    font-family: 'Inter', sans-serif;
+    color: #1e293b;
+    font-weight: 800;
+}
+
+/* Adjusting the sidebar width and color */
+section[data-testid="stSidebar"] {
+    background-color: #f1f5f9;
+}
