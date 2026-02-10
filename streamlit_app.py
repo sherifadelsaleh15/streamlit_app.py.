@@ -13,25 +13,20 @@ import utils
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon="🚀",
     layout="wide"
 )
 
-# Apply the custom CSS from assets/styles.css
-try:
-    apply_custom_css()
-except Exception:
-    st.info("Custom CSS file not found, using default styles.")
+# Apply the custom CSS
+apply_custom_css()
 
 # --- 2. DATA LOADING ---
 df = load_and_preprocess_data()
 
 if not df.empty:
     # --- 3. SIDEBAR FILTERS ---
-    st.sidebar.title("🎮 Dashboard Controls")
+    st.sidebar.title("Dashboard Controls")
     
-    # Use sel_tab consistently
-    sel_tab = st.sidebar.selectbox("📂 Select Data Source", TABS)
+    sel_tab = st.sidebar.selectbox("Select Data Source", TABS)
     
     # Display the Date Range utility in the sidebar
     st.sidebar.info(utils.get_date_range_label(df))
@@ -42,18 +37,17 @@ if not df.empty:
     
     # Filter Objectives
     obj_list = sorted(tab_df['Objective'].unique())
-    sel_objs = st.sidebar.multiselect("🎯 Filter Objectives", obj_list)
+    sel_objs = st.sidebar.multiselect("Filter Objectives", obj_list)
     if sel_objs:
         tab_df = tab_df[tab_df['Objective'].isin(sel_objs)]
         
     # Filter OKRs
     okr_list = sorted(tab_df['OKR'].unique())
-    sel_okrs = st.sidebar.multiselect("📊 Filter OKRs", okr_list)
+    sel_okrs = st.sidebar.multiselect("Filter OKRs", okr_list)
     if sel_okrs:
         tab_df = tab_df[tab_df['OKR'].isin(sel_okrs)]
 
     # --- 4. MAIN CONTENT AREA ---
-    # Fixed the variable name here to sel_tab
     render_header(APP_TITLE, f"Strategic insights for {sel_tab}")
 
     # KPI Summary Row
@@ -91,9 +85,9 @@ if not df.empty:
     render_footer()
 
 else:
-    st.error("❌ No data loaded. Check config.py and your Google Sheet connection.")
+    st.error("No data loaded. Check config.py and your Google Sheet connection.")
 
 # Refresh Button
-if st.sidebar.button("🔄 Force Refresh Data"):
+if st.sidebar.button("Force Refresh Data"):
     st.cache_data.clear()
     st.rerun()
