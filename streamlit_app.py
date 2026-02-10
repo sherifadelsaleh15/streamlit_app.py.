@@ -3,54 +3,72 @@ import pandas as pd
 from config import APP_TITLE, TABS
 from modules.data_loader import load_and_preprocess_data
 from modules.visualizations import render_metric_chart, render_top_breakdown
-from modules.ui_components import apply_custom_css, render_header, render_footer, render_sidebar_logo
+from modules.ui_components import (
+    apply_custom_css, render_header, render_footer, 
+    render_sidebar_logo, render_pdf_button
+)
 from modules.ai_engine import get_ai_strategic_insight
 
+# 1. Page Configuration
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 apply_custom_css()
 
-# 1. Load Data
+# 2. Data Loading
 df_dict = load_and_preprocess_data()
 
-# 2. Sidebar
+# 3. Sidebar Setup
 render_sidebar_logo()
 
-# --- NEW: Groq Chat Box in Sidebar ---
-st.sidebar.subheader("💬 Fast AI Chat (Groq)")
-user_query = st.sidebar.text_input("Ask about your data:")
-if user_query:
-    # We use engine="groq" for the quick chat
-    answer = get_ai_strategic_insight(pd.concat(df_dict.values()), "Global", engine="groq", custom_prompt=user_query)
-    st.sidebar.info(answer)
+st.sidebar.title("🌍 Global Filters")
 
-st.sidebar.divider()
+# Tab Selection
 sel_tab = st.sidebar.selectbox("Select Strategy Tab", TABS)
 tab_df = df_dict.get(sel_tab, pd.DataFrame())
 
 if not tab_df.empty:
-    # --- FIX: Objective Filter (Multi-select defaults to ALL) ---
-    obj_col = next((c for c in tab_df.columns if 'Objective' in c), None)
+    # --- FIX: REGION & COUNTRY DETECTION ---
+    # Dynamically find columns for Region/Country/Geo
+    region_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+    
+    if region_col:
+        all_regions = sorted(tab_df[region_col].unique())
+        # Default to ALL regions selected
+        sel_regions = st.sidebar.multiselect(f"Filter by {region_col}", all_regions, default=all_regions)
+        tab_df = tab_df[tab_df[region_col].isin(sel_regions)]
+
+    # --- FIX: OBJECTIVE AUTO-SELECT ---
+    obj_col = next((c for c in tab_df.columns if 'OBJECTIVE' in c.upper()), None)
     if obj_col:
-        unique_objs = sorted(tab_df[obj_col].unique())
-        # Defaulting to ALL unique objectives ensures they all appear on start
-        sel_objs = st.sidebar.multiselect("Filter Objectives", unique_objs, default=unique_objs)
+        all_objs = sorted(tab_df[obj_col].unique())
+        # Default to ALL objectives selected so charts appear immediately
+        sel_objs = st.sidebar.multiselect("Filter Objectives", all_objs, default=all_objs)
         tab_df = tab_df[tab_df[obj_col].isin(sel_objs)]
 
-    # 3. Header
-    render_header(APP_TITLE, f"Performance: {sel_tab}")
-
-    # 4. Deep Summary (Gemini)
-    with st.expander("📝 Deep Executive Summary (Gemini)", expanded=False):
-        if st.button("Generate Monthly Report"):
-            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
-            st.markdown(report)
-
-    # 5. Visualizations (All charts appear automatically)
-    if any(k in sel_tab.upper() for k in ["GSC", "TOP_PAGES", "GA4"]):
-        render_top_breakdown(tab_df, sel_tab)
+    st.sidebar.divider()
     
-    st.subheader("Performance Trends")
-    # Dynamically find all numeric metrics
+    # --- SIDEBAR AI CHAT (GROQ) ---
+    st.sidebar.subheader("💬 Chat with Data (Groq)")
+    user_q = st.sidebar.text_input("Ask about these regions/rows:")
+    if user_q:
+        with st.sidebar:
+            with st.spinner("Groq is scanning rows..."):
+                chat_res = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
+                st.info(chat_res)
+
+    # 4. Main Dashboard Header
+    render_header(APP_TITLE, f"Analysis: {sel_tab}")
+
+    # 5. EXECUTIVE SUMMARY (GEMINI)
+    with st.expander("📝 Deep Executive Analysis (Gemini)", expanded=False):
+        if st.button("Generate Regional Performance Report"):
+            with st.spinner("Gemini is analyzing all rows..."):
+                report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
+                st.markdown(report)
+
+    # 6. CHARTS (Automatic rendering for all metrics/rows)
+    st.subheader("📊 Performance Trends")
+    
+    # Identify value columns (Metric_Name or generic numeric columns)
     if 'Metric_Name' in tab_df.columns:
         metrics = sorted(tab_df['Metric_Name'].unique())
         cols = st.columns(2)
@@ -59,11 +77,23 @@ if not tab_df.empty:
             with cols[i % 2]:
                 render_metric_chart(m_data, m_name, 'Value', key_suffix=f"{sel_tab}_{i}")
     else:
-        # Loop through all numeric columns (Clicks, Views, etc.)
-        num_cols = [c for c in tab_df.select_dtypes('number').columns if not any(x in c.upper() for x in ['ID', 'POS'])]
+        # Fallback: find all numeric columns that aren't IDs
+        num_cols = [c for c in tab_df.select_dtypes('number').columns 
+                    if not any(x in c.upper() for x in ['ID', 'POS', 'YEAR', 'MONTH'])]
         cols = st.columns(2)
         for i, m_name in enumerate(num_cols):
             with cols[i % 2]:
                 render_metric_chart(tab_df, m_name, m_name, key_suffix=f"{sel_tab}_{i}")
 
+    # 7. SPECIALIZED BREAKDOWNS (GSC/GA4 Pages)
+    if any(k in sel_tab.upper() for k in ["GSC", "TOP_PAGES", "GA4"]):
+        st.divider()
+        render_top_breakdown(tab_df, sel_tab)
+
+    # 8. RAW DATA PREVIEW
+    with st.expander("📋 View Filtered Source Data"):
+        st.dataframe(tab_df, use_container_width=True, hide_index=True)
+
     render_footer()
+else:
+    st.error(f"Tab '{sel_tab}' contains no data. Please check your source file.")
