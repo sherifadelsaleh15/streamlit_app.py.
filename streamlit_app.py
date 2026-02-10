@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
-from utils import get_prediction  # Your new Scikit-Learn logic
+from utils import get_prediction
 
 st.set_page_config(layout="wide", page_title="Strategic OKR Dashboard")
 
@@ -19,12 +19,19 @@ except Exception as e:
     st.error(f"Data Loading Error: {e}")
     st.stop()
 
+# Sidebar Selection
 sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame())
 
 if not tab_df.empty:
-    # --- FILTERS ---
+    # --- DYNAMIC COLUMN DETECTION ---
+    # We look for the standardized column names created by our loader
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+    value_col = next((c for c in tab_df.columns if 'VALUE' in c.upper()), None)
+    metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
+    date_col = 'dt' if 'dt' in tab_df.columns else None
+
+    # --- FILTERS ---
     if loc_col:
         all_locs = sorted(tab_df[loc_col].unique())
         sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
@@ -34,10 +41,11 @@ if not tab_df.empty:
     st.subheader("Strategic AI Report")
     if st.button("Generate Executive Analysis"):
         with st.spinner("AI is analyzing trends..."):
-            # We pass a sample forecast to the AI to make the report "Forward Looking"
             sample_forecast = None
-            if 'Value' in tab_df.columns and len(tab_df) > 2:
-                sample_forecast = get_prediction(tab_df.head(20))
+            if value_col and len(tab_df) > 2:
+                # Prepare a sample for the AI using the dynamic value column
+                sample_data = tab_df.rename(columns={value_col: 'Value'})
+                sample_forecast = get_prediction(sample_data.head(20))
                 
             report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini", forecast_df=sample_forecast)
             st.markdown(report)
@@ -58,41 +66,42 @@ if not tab_df.empty:
         with col1:
             st.subheader("Top 15 Pages Ranking")
             page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
-            num_cols = tab_df.select_dtypes('number').columns
-            if page_col and len(num_cols) > 0:
-                top_15_df = tab_df.groupby(page_col)[num_cols[0]].sum().sort_values(ascending=False).head(15).reset_index()
-                fig_top = px.bar(top_15_df, x=num_cols[0], y=page_col, orientation='h', color=num_cols[0], template="plotly_white")
+            if page_col and value_col:
+                top_15_df = tab_df.groupby(page_col)[value_col].sum().sort_values(ascending=False).head(15).reset_index()
+                fig_top = px.bar(top_15_df, x=value_col, y=page_col, orientation='h', color=value_col, template="plotly_white")
                 fig_top.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_top, use_container_width=True)
 
-    # 2. GSC KEYWORDS
-    if "GSC" in sel_tab.upper() or "KEYWORD" in sel_tab.upper():
+    # 2. GSC KEYWORDS / RANKINGS
+    if "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper():
         with col2:
-            st.subheader("Top 20 Keywords Ranking")
-            kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
-            click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), None)
-            if kw_col and click_col:
-                top_20_df = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
-                fig_kw = px.bar(top_20_df, x=click_col, y=kw_col, orientation='h', color=click_col, template="plotly_white")
-                fig_kw.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_kw, use_container_width=True)
+            st.subheader("Top Metrics Comparison")
+            # For SEO rankings, we usually want to see the best (lowest) numbers
+            if "POSITION" in sel_tab.upper():
+                top_data = tab_df.groupby(metric_name_col)[value_col].min().sort_values().head(20).reset_index()
+                fig_kw = px.bar(top_data, x=value_col, y=metric_name_col, orientation='h', template="plotly_white", title="Best Rankings (Top 20)")
+                fig_kw.update_layout(xaxis=dict(autorange="reversed"), yaxis={'categoryorder':'total descending'})
+            else:
+                kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), metric_name_col)
+                top_data = tab_df.groupby(kw_col)[value_col].sum().sort_values(ascending=False).head(20).reset_index()
+                fig_kw = px.bar(top_data, x=value_col, y=kw_col, orientation='h', template="plotly_white")
+            
+            st.plotly_chart(fig_kw, use_container_width=True)
 
     st.divider()
 
-    # --- PERFORMANCE TRENDS WITH LIGHTWEIGHT FORECAST ---
+    # --- PERFORMANCE TRENDS WITH AI PROJECTION ---
     st.subheader("Performance Trends & AI Projection")
     show_forecast = st.checkbox("🔮 Show Lightweight Trend Forecast", value=True)
     
-    metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
-    has_value_col = 'Value' in tab_df.columns
-    locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
-    
-    chart_counter = 0 
-    for loc in locations:
-        loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+    if metric_name_col and value_col and date_col:
+        locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
         
-        if metric_name_col and has_value_col:
+        chart_counter = 0 
+        for loc in locations:
+            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             unique_metrics = sorted(loc_data[metric_name_col].unique())
+            
             for met in unique_metrics:
                 chart_df = loc_data[loc_data[metric_name_col] == met].sort_values('dt')
                 if not chart_df.empty:
@@ -100,23 +109,27 @@ if not tab_df.empty:
                     with st.container():
                         st.markdown(f"### {met} - {loc if loc else ''}")
                         
-                        # Create actual line chart
-                        fig = px.line(chart_df, x='dt', y='Value', markers=True)
+                        # Dynamic Line Chart
+                        fig = px.line(chart_df, x='dt', y=value_col, markers=True)
                         
+                        # Invert Y-axis only for SEO Position Tracking (1 is top)
+                        if "POSITION" in sel_tab.upper():
+                            fig.update_layout(yaxis=dict(autorange="reversed", title="Search Rank (Lower is Better)"))
+
                         # Add Forecast if enabled
                         if show_forecast and len(chart_df) >= 2:
-                            forecast = get_prediction(chart_df)
+                            # Standardize column name for the prediction utility
+                            forecast_input = chart_df.rename(columns={value_col: 'Value'})
+                            forecast = get_prediction(forecast_input)
+                            
                             if forecast is not None:
-                                # Add Shaded Area (Confidence)
                                 fig.add_trace(go.Scatter(
                                     x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
                                     y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
-                                    fill='toself',
-                                    fillcolor='rgba(255,165,0,0.1)',
+                                    fill='toself', fillcolor='rgba(255,165,0,0.1)',
                                     line=dict(color='rgba(255,255,255,0)'),
                                     name='Confidence', showlegend=False
                                 ))
-                                # Add Prediction Line
                                 fig.add_trace(go.Scatter(
                                     x=forecast['ds'], y=forecast['yhat'],
                                     mode='lines', name='AI Trend',
@@ -140,19 +153,3 @@ if not tab_df.empty:
             st.sidebar.info(f"**You:** {q}")
             st.sidebar.write(f"**AI:** {a}")
             st.sidebar.divider()
-# --- PERFORMANCE TRENDS WITH INVERTED Y-AXIS FOR RANKINGS ---
-# ... (inside your loc/metric loops) ...
-
-# 1. Create the base line chart
-fig = px.line(chart_df, x='dt', y='Value', markers=True)
-
-# 2. Check if this is the Position Tracking tab
-if "POSITION_TRACKING" in sel_tab.upper():
-    # Invert Y-axis so Position 1 is at the top
-    fig.update_layout(yaxis=dict(autorange="reversed", title="Search Position (Lower is Better)"))
-    # Ensure the AI Trend line also respects the inverted axis
-    line_color = 'green' # Green for SEO improvement
-else:
-    line_color = 'orange'
-
-# ... (rest of your go.Scatter forecast logic) ...
