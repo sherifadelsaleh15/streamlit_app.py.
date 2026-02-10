@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go # Added for advanced chart overlays
+import plotly.graph_objects as go
 from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
-from utils import get_prediction # Ensure you added the function to utils.py
+from utils import get_prediction 
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="Strategic OKR Dashboard")
 
 # 1. Initialize Session State
 if "chat_history" not in st.session_state:
@@ -25,31 +25,29 @@ if not tab_df.empty:
         sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # --- REPORT SECTION ---
-    st.subheader("Report")
-    if st.button("Generate Comparison Report"):
-        report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
-        st.write(report)
-        st.download_button("Download Report", report, file_name=f"{sel_tab}_comparison.txt")
+    # --- REPORT SECTION (NOW FORECAST-AWARE) ---
+    st.subheader("Strategic AI Report")
+    if st.button("Generate Executive Analysis"):
+        with st.spinner("AI is analyzing historical trends and future projections..."):
+            # We provide the AI with a sample forecast from the first metric to give it 'future' context
+            sample_forecast = None
+            if 'Value' in tab_df.columns and not tab_df.empty:
+                sample_forecast = get_prediction(tab_df.head(20)) # Get a trend overview
+            
+            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini", forecast_df=sample_forecast)
+            st.markdown(report)
+            st.download_button("Download Report", report, file_name=f"{sel_tab}_ai_analysis.txt")
 
     st.divider()
 
     # --- DATA TABLE ---
-    st.subheader("Data Table")
+    st.subheader("Data Explorer")
     st.dataframe(tab_df, use_container_width=True)
-    st.download_button("Download Table CSV", tab_df.to_csv(index=False), file_name=f"{sel_tab}_data.csv")
-
-    st.divider()
-
-    # --- TOP LISTS (UNCHANGED) ---
-    # ... [Keep your Top 15 Pages and Top 20 Keywords code here] ...
-
-    st.divider()
-
-    # --- ENHANCED OKR CHART LOGIC WITH PREDICTION ---
-    st.subheader("Individual Performance & AI Forecast")
     
-    # NEW: Toggle to show/hide forecast globally
+    st.divider()
+
+    # --- ENHANCED OKR CHART LOGIC ---
+    st.subheader("Individual Performance & AI Forecast")
     show_forecast = st.checkbox("🔮 Enable AI Predictive Forecasting", value=True)
     
     metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
@@ -68,40 +66,43 @@ if not tab_df.empty:
                     chart_counter += 1
                     with st.container():
                         st.markdown(f"### {met} - {loc if loc else ''}")
+                        fig = px.line(chart_df, x='dt', y='Value', markers=True, line_shape="spline")
                         
-                        # Create the Base Line Chart
-                        fig = px.line(chart_df, x='dt', y='Value', markers=True)
-                        
-                        # --- START PROPHET INTEGRATION ---
+                        # --- PROPHET INTEGRATION ---
                         if show_forecast and len(chart_df) >= 2:
                             forecast = get_prediction(chart_df)
                             if forecast is not None:
-                                # Add the shaded confidence interval
+                                # Shaded Confidence Interval
                                 fig.add_trace(go.Scatter(
                                     x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
                                     y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
                                     fill='toself',
-                                    fillcolor='rgba(255,165,0,0.2)',
+                                    fillcolor='rgba(255,165,0,0.15)',
                                     line=dict(color='rgba(255,255,255,0)'),
-                                    hoverinfo="skip",
-                                    showlegend=True,
-                                    name="Confidence Interval"
+                                    name="Confidence Interval",
+                                    showlegend=False
                                 ))
-                                # Add the predicted trend line
+                                # Prediction Line
                                 fig.add_trace(go.Scatter(
                                     x=forecast['ds'], y=forecast['yhat'],
-                                    mode='lines',
-                                    name='AI Prediction',
-                                    line=dict(color='orange', dash='dash')
+                                    mode='lines', name='AI Prediction',
+                                    line=dict(color='orange', dash='dot', width=3)
                                 ))
-                        # --- END PROPHET INTEGRATION ---
-
+                        
                         st.plotly_chart(fig, use_container_width=True, key=f"chart_{chart_counter}")
-                        st.download_button(f"Download Data for {met}", chart_df.to_csv(index=False), 
-                                         file_name=f"{met}_{loc}.csv", key=f"dl_{chart_counter}")
                         st.write("---")
-        
-        # ... [Handle the 'else' case for num_cols if needed, similar to above] ...
 
-    # --- SIDEBAR CHAT (UNCHANGED) ---
-    # ... [Keep your sidebar chat code here] ...
+    # --- SIDEBAR CHAT ---
+    st.sidebar.divider()
+    user_q = st.sidebar.text_input("Ask AI about this data:", key="user_input")
+    if user_q:
+        with st.sidebar:
+            with st.spinner("Consulting AI..."):
+                ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
+                st.session_state.chat_history.append((user_q, ans))
+    
+    if st.session_state.chat_history:
+        for q, a in st.session_state.chat_history[::-1]:
+            st.sidebar.info(f"**You:** {q}")
+            st.sidebar.write(f"**AI:** {a}")
+            st.sidebar.divider()
