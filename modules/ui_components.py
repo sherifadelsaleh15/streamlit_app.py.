@@ -2,47 +2,26 @@ import streamlit as st
 import os
 
 def apply_custom_css():
-    """
-    Loads the Raleway Light Mode CSS from assets/styles.css
-    """
+    """Loads the Raleway Light Mode CSS"""
     css_path = "assets/styles.css"
     try:
         if os.path.exists(css_path):
             with open(css_path, "r") as f:
                 st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-    except Exception as e:
-        # This prevents the app from crashing if the CSS file is missing
+    except Exception:
         pass
 
 def render_sidebar_logo():
-    """
-    Searches for and displays the company logo in the sidebar.
-    """
-    possible_paths = [
-        "assets/images/140x60.png",
-        "images/140x60.png",
-        "assets/140x60.png",
-        "140x60.png"
-    ]
-    
-    found_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            found_path = path
-            break
-            
-    if found_path:
-        st.sidebar.image(found_path, width=140)
+    """Displays the logo at the top of the sidebar"""
+    logo_path = "assets/images/140x60.png"
+    if os.path.exists(logo_path):
+        st.sidebar.image(logo_path, width=140)
         st.sidebar.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
     else:
-        # Fallback text if logo is not found
-        st.sidebar.markdown("<h2 style='letter-spacing: 2px; color: #1a1a1a;'>STRATEGY HUB</h2>", unsafe_allow_html=True)
-        st.sidebar.markdown("---")
+        st.sidebar.markdown("<h2 style='letter-spacing: 2px;'>STRATEGY HUB</h2>", unsafe_allow_html=True)
 
 def render_header(title, subtitle):
-    """
-    Renders the main dashboard header in Raleway font (Black on White).
-    """
+    """Executive header with Raleway typography"""
     st.markdown(f"""
         <div style="margin-bottom: 2.5rem; font-family: 'Raleway', sans-serif;">
             <h1 style="color: #1a1a1a; font-size: 3rem; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 0; line-height: 1;">
@@ -54,10 +33,18 @@ def render_header(title, subtitle):
         </div>
     """, unsafe_allow_html=True)
 
+def render_pdf_button():
+    """Triggers browser print dialog for PDF export"""
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Export Dashboard to PDF"):
+        st.components.v1.html(
+            "<script>window.parent.print();</script>",
+            height=0, width=0,
+        )
+    st.sidebar.caption("Ensure 'Background Graphics' is ON in print settings.")
+
 def render_footer():
-    """
-    Renders a clean, light-mode footer.
-    """
+    """Minimalist footer"""
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     st.markdown("<hr style='border-top: 1px solid #e2e8f0;'>", unsafe_allow_html=True)
     st.markdown(
