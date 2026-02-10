@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
+from utils import get_prediction  # Your new Scikit-Learn logic
 
 st.set_page_config(layout="wide", page_title="Strategic OKR Dashboard")
 
@@ -32,7 +34,12 @@ if not tab_df.empty:
     st.subheader("Strategic AI Report")
     if st.button("Generate Executive Analysis"):
         with st.spinner("AI is analyzing trends..."):
-            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
+            # We pass a sample forecast to the AI to make the report "Forward Looking"
+            sample_forecast = None
+            if 'Value' in tab_df.columns and len(tab_df) > 2:
+                sample_forecast = get_prediction(tab_df.head(20))
+                
+            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini", forecast_df=sample_forecast)
             st.markdown(report)
 
     st.divider()
@@ -43,47 +50,38 @@ if not tab_df.empty:
     
     st.divider()
 
-    # ==========================================
-    # --- RESTORED: TOP LISTS (BAR CHARTS) ---
-    # ==========================================
-    
-    # 1. GA4 TOP PAGES LOGIC
-    if "TOP_PAGES" in sel_tab.upper() or "GA4" in sel_tab.upper():
-        st.subheader("Top 15 Pages Ranking")
-        # Find the text column (Page/URL)
-        page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
-        # Find the number column (Views, Users, etc.)
-        num_cols = tab_df.select_dtypes('number').columns
-        
-        if page_col and len(num_cols) > 0:
-            # Group by Page and Sum the first numeric metric
-            top_15_df = tab_df.groupby(page_col)[num_cols[0]].sum().sort_values(ascending=False).head(15).reset_index()
-            
-            fig_top = px.bar(top_15_df, x=num_cols[0], y=page_col, orientation='h', 
-                             title=f"Top 15 Pages by {num_cols[0]}", color=num_cols[0])
-            fig_top.update_layout(yaxis={'categoryorder':'total ascending'}) # Sort bars nicely
-            st.plotly_chart(fig_top, use_container_width=True, key="top_15_chart")
+    # --- TOP LISTS (BAR CHARTS) ---
+    col1, col2 = st.columns(2)
 
-    # 2. GSC KEYWORDS LOGIC
+    # 1. GA4 TOP PAGES
+    if "TOP_PAGES" in sel_tab.upper() or "GA4" in sel_tab.upper():
+        with col1:
+            st.subheader("Top 15 Pages Ranking")
+            page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
+            num_cols = tab_df.select_dtypes('number').columns
+            if page_col and len(num_cols) > 0:
+                top_15_df = tab_df.groupby(page_col)[num_cols[0]].sum().sort_values(ascending=False).head(15).reset_index()
+                fig_top = px.bar(top_15_df, x=num_cols[0], y=page_col, orientation='h', color=num_cols[0], template="plotly_white")
+                fig_top.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_top, use_container_width=True)
+
+    # 2. GSC KEYWORDS
     if "GSC" in sel_tab.upper() or "KEYWORD" in sel_tab.upper():
-        st.subheader("Top 20 Keywords Ranking")
-        # Find text column (Query/Keyword)
-        kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
-        # Find clicks column
-        click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), None)
-        
-        if kw_col and click_col:
-            top_20_df = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
-            
-            fig_kw = px.bar(top_20_df, x=click_col, y=kw_col, orientation='h', 
-                            title="Top 20 Queries by Clicks", color=click_col)
-            fig_kw.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig_kw, use_container_width=True, key="top_20_chart")
+        with col2:
+            st.subheader("Top 20 Keywords Ranking")
+            kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+            click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), None)
+            if kw_col and click_col:
+                top_20_df = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
+                fig_kw = px.bar(top_20_df, x=click_col, y=kw_col, orientation='h', color=click_col, template="plotly_white")
+                fig_kw.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_kw, use_container_width=True)
 
     st.divider()
 
-    # --- PERFORMANCE CHARTS (LINE CHARTS) ---
-    st.subheader("Performance Trends")
+    # --- PERFORMANCE TRENDS WITH LIGHTWEIGHT FORECAST ---
+    st.subheader("Performance Trends & AI Projection")
+    show_forecast = st.checkbox("🔮 Show Lightweight Trend Forecast", value=True)
     
     metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
     has_value_col = 'Value' in tab_df.columns
@@ -101,8 +99,30 @@ if not tab_df.empty:
                     chart_counter += 1
                     with st.container():
                         st.markdown(f"### {met} - {loc if loc else ''}")
-                        # Added 'trendline="ols"' for a lightweight trend line without Prophet!
+                        
+                        # Create actual line chart
                         fig = px.line(chart_df, x='dt', y='Value', markers=True)
+                        
+                        # Add Forecast if enabled
+                        if show_forecast and len(chart_df) >= 2:
+                            forecast = get_prediction(chart_df)
+                            if forecast is not None:
+                                # Add Shaded Area (Confidence)
+                                fig.add_trace(go.Scatter(
+                                    x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
+                                    y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
+                                    fill='toself',
+                                    fillcolor='rgba(255,165,0,0.1)',
+                                    line=dict(color='rgba(255,255,255,0)'),
+                                    name='Confidence', showlegend=False
+                                ))
+                                # Add Prediction Line
+                                fig.add_trace(go.Scatter(
+                                    x=forecast['ds'], y=forecast['yhat'],
+                                    mode='lines', name='AI Trend',
+                                    line=dict(color='orange', dash='dash')
+                                ))
+
                         st.plotly_chart(fig, use_container_width=True, key=f"chart_{chart_counter}")
                         st.write("---")
 
