@@ -1,38 +1,35 @@
 import pandas as pd
 import numpy as np
+from sklearn.linear_model import LinearRegression
+import datetime
 
-def generate_forecast(df, periods=6):
-    """Calculates a simple linear projection for the next few months"""
-    if len(df) < 3:
+def generate_forecast(df, val_col, months_to_forecast=3):
+    """
+    Predicts future values using Linear Regression.
+    """
+    try:
+        if df.empty or len(df.dropna(subset=[val_col])) < 2:
+            return pd.DataFrame()
+
+        # Prepare historical data
+        df_hist = df.groupby('dt')[val_col].sum().reset_index().sort_values('dt')
+        
+        # Convert dates to ordinal numbers for regression
+        X = np.array([d.toordinal() for d in df_hist['dt']]).reshape(-1, 1)
+        y = df_hist[val_col].values
+        
+        # Train Model
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        # Create Future Dates
+        last_date = df_hist['dt'].max()
+        future_dates = [last_date + pd.DateOffset(months=i+1) for i in range(months_to_forecast)]
+        future_X = np.array([d.toordinal() for d in future_dates]).reshape(-1, 1)
+        
+        # Predict
+        preds = model.predict(future_X)
+        
+        return pd.DataFrame({'dt': future_dates, val_col: preds})
+    except:
         return pd.DataFrame()
-
-    # Sort and group by date to get a single time series
-    ts = df.groupby('dt')['Val'].sum().reset_index().sort_values('dt')
-    
-    # Create numeric X values (0, 1, 2...) for the regression
-    ts['x'] = np.arange(len(ts))
-    y = ts['Val'].values
-    x = ts['x'].values
-    
-    # Simple linear regression (slope and intercept)
-    slope, intercept = np.polyfit(x, y, 1)
-    
-    # Generate future dates
-    last_date = ts['dt'].max()
-    future_dates = pd.date_range(last_date, periods=periods + 1, freq='ME')[1:]
-    
-    # Calculate future Y values
-    future_x = np.arange(len(ts), len(ts) + periods)
-    future_y = slope * future_x + intercept
-    
-    # Ensure no negative forecasts
-    future_y = np.maximum(future_y, 0)
-    
-    forecast_df = pd.DataFrame({
-        'dt': future_dates,
-        'Val': future_y,
-        'Month_Display': future_dates.strftime('%b %Y'),
-        'Status': 'Forecast'
-    })
-    
-    return forecast_df
