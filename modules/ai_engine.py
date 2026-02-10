@@ -2,49 +2,48 @@ import streamlit as st
 from groq import Groq
 import google.generativeai as genai
 
-# API Keys
-GROQ_API_KEY = "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"
-GEMINI_API_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
-
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
-    """
-    Unified AI Engine with Fixed Model Strings and Fallback Logic.
-    """
-    try:
-        # Prepare context (Last 20 rows)
-        data_summary = df.tail(20).to_string()
-        
-        system_msg = "You are a Senior Strategy Consultant."
-        if custom_prompt:
-            user_msg = f"Data: {data_summary}\n\nQuestion: {custom_prompt}"
-        else:
-            user_msg = f"Data for {tab_name}: {data_summary}\n\nTask: Provide 3 executive bullet points on trends and risks."
+    # Using st.secrets is safer than hardcoding strings!
+    GROQ_KEY = st.secrets.get("GROQ_API_KEY")
+    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY")
+    
+    # Prep data
+    data_summary = df.tail(20).to_string()
+    system_msg = (
+        "You are a Strategic Data Analyst. "
+        "Always include a 'Data Health Grade' (A, B, or C) at the start of your report."
+    )
+    
+    user_msg = custom_prompt if custom_prompt else f"Analyze OKR trends for {tab_name}."
+    full_query = f"{user_msg}\n\nContext Data (Last 20 rows):\n{data_summary}"
 
-        # --- ENGINE: GEMINI ---
-        if engine == "gemini":
-            try:
-                genai.configure(api_key=GEMINI_API_KEY)
-                # Try the standard model name
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(user_msg)
-                return response.text
-            except Exception as gem_err:
-                # If Gemini fails, automatically fallback to Groq so the user gets a report
-                st.warning("Gemini model error. Switching to Groq for your report...")
-                engine = "groq"
+    # --- Engine: Gemini ---
+    if engine == "gemini":
+        try:
+            genai.configure(api_key=GEMINI_KEY)
+            # Gemini 1.5 Pro/Flash uses system_instruction in the constructor
+            model = genai.GenerativeModel(
+                model_name='gemini-1.5-flash',
+                system_instruction=system_msg
+            )
+            response = model.generate_content(full_query)
+            return response.text
+        except Exception as e:
+            st.toast(f"Gemini Error: {str(e)}. Falling back to Groq...", icon="🔄")
+            engine = "groq" # Trigger fallback
 
-        # --- ENGINE: GROQ ---
-        if engine == "groq":
-            client = Groq(api_key=GROQ_API_KEY)
-            response = client.chat.completions.create(
+    # --- Engine: Groq ---
+    if engine == "groq":
+        try:
+            client = Groq(api_key=GROQ_KEY)
+            completion = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg}
+                    {"role": "user", "content": full_query}
                 ],
-                temperature=0.2
+                temperature=0.3
             )
-            return response.choices[0].message.content
-
-    except Exception as e:
-        return f"❌ AI Engine Error: {str(e)}"
+            return completion.choices[0].message.content
+        except Exception as e:
+            return f"❌ Critical Error: Both engines failed. {str(e)}"
