@@ -7,19 +7,20 @@ GEMINI_API_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     try:
-        # Strictly limit the AI to the dataframe content
         data_summary = df.to_string()
         
-        # This prompt forces the AI to ignore its training data/web knowledge
+        # New Strict Instructions: No listing, only analysis
         system_msg = (
-            "You are a local data processor. Use ONLY the provided data. "
-            "If the information is not in the data, say 'Not found in data'. "
-            "Do not use external web knowledge or search the internet."
+            "You are a Data Analyst. Do not list column names or row counts. "
+            "Instead, identify the highest and lowest performing regions. "
+            "Compare the latest month vs the previous month. "
+            "Identify any anomalies where values dropped to zero. "
+            "Focus on 'Value' or metric trends. If data is missing, say so."
         )
         
-        user_msg = f"Table Data:\n{data_summary}\n\nTask: Analyze {tab_name} rows only."
+        user_msg = f"Analyze the following {tab_name} data and provide a strategic summary:\n\n{data_summary}"
         if custom_prompt:
-            user_msg = f"Table Data:\n{data_summary}\n\nUser Question: {custom_prompt}"
+            user_msg = f"Data:\n{data_summary}\n\nQuestion: {custom_prompt}"
 
         if engine == "gemini":
             try:
@@ -34,10 +35,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
             client = Groq(api_key=GROQ_API_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg}
-                ]
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}]
             )
             return response.choices[0].message.content
     except Exception as e:
