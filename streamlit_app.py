@@ -36,12 +36,17 @@ if not df.empty:
 
     st.markdown("---")
 
-    # 4. Grid of Charts
+   # 4. Grid of Charts with Forecast
     metrics = tab_df['Metric'].unique()
     cols = st.columns(2)
+    
     for idx, m in enumerate(metrics):
+        metric_data = tab_df[tab_df['Metric'] == m]
+        
+        # Calculate forecast for this specific metric
+        f_df = generate_forecast(metric_data)
+        
         with cols[idx % 2]:
-            render_metric_chart(tab_df, m)
-
+            render_metric_chart(tab_df, m, forecast_df=f_df)
 else:
     st.error("Data not found. Please check your Google Sheet and config.py.")
