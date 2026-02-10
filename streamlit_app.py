@@ -31,7 +31,7 @@ if not tab_df.empty:
     page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
     date_col = 'dt'
 
-    # Clean numeric data & Ensure column exists
+    # Clean numeric data & handle mixed types
     if value_col:
         tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
 
@@ -39,7 +39,9 @@ if not tab_df.empty:
 
     # --- FILTERS ---
     if loc_col:
-        all_locs = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany')
+        # Clean and sort locations, forcing Germany to the top
+        raw_locs = tab_df[loc_col].dropna().unique()
+        all_locs = sorted([str(x) for x in raw_locs], key=lambda x: x != 'Germany')
         sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
@@ -54,7 +56,7 @@ if not tab_df.empty:
             top_pages = top_pages.sort_values(by=value_col, ascending=(agg_func=='min')).head(15)
             fig_top = px.bar(top_pages, x=value_col, y=page_col, orientation='h', title="Top 15 Pages", template="plotly_white")
             if is_ranking: fig_top.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_top, use_container_width=True)
+            st.plotly_chart(fig_top, use_container_width=True, key="main_top_pages_bar")
 
     with col2:
         if metric_name_col and value_col:
@@ -63,42 +65,45 @@ if not tab_df.empty:
             top_metrics = top_metrics.sort_values(by=value_col, ascending=(agg_func=='min')).head(20)
             fig_kw = px.bar(top_metrics, x=value_col, y=metric_name_col, orientation='h', title="Top 20 Keywords", template="plotly_white")
             if is_ranking: fig_kw.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_kw, use_container_width=True)
+            st.plotly_chart(fig_kw, use_container_width=True, key="main_top_keywords_bar")
 
     st.divider()
 
-    # --- INDIVIDUAL KEYWORD TRENDS (GSC & POSITION TRACKING) ---
+    # --- INDIVIDUAL KEYWORD TRENDS (MONTHLY) ---
     st.subheader("Monthly Keyword Deep-Dive")
     
     if metric_name_col and value_col and date_col in tab_df.columns:
-        # Determine sorting by volume (GSC) or Best Rank (Position Tracking)
-        agg_for_sorting = 'min' if is_ranking else 'sum'
-        top_kws_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_for_sorting).sort_values(ascending=(agg_for_sorting=='min')).head(20).index.tolist()
+        # Get the list of top 20 keywords globally for this tab to generate charts
+        agg_sort = 'min' if is_ranking else 'sum'
+        top_20_global = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
 
-        # Highlight Germany first
-        locations = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
+        # Group by Region, prioritizing Germany
+        loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
         
-        for loc in locations:
-            loc_label = f"📍 Region: {loc}" if loc else "Global"
-            st.markdown(f"### {loc_label}")
-            
+        chart_idx = 0
+        for loc in loc_list:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+            st.markdown(f"### 📍 Region: {loc if loc else 'Global'}")
             
-            # FIX: Ensure keywords are strings and drop NaNs to prevent TypeError
-            keywords = [kw for kw in top_kws_list if kw in loc_data[metric_name_col].unique()]
+            # Filter the global top 20 for keywords that actually exist in this specific region
+            region_keywords = [kw for kw in top_20_global if kw in loc_data[metric_name_col].unique()]
 
-            for kw in keywords:
+            for kw in region_keywords:
                 kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
+                chart_idx += 1
                 
+                # Expand Germany by default
                 with st.expander(f"Monthly Trend: {kw}", expanded=(loc == 'Germany')):
                     c1, c2 = st.columns([3, 1])
                     with c1:
                         fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350)
                         if is_ranking:
-                            fig.update_layout(yaxis=dict(autorange="reversed", title="Rank"))
-                        st.plotly_chart(fig, use_container_width=True)
+                            fig.update_layout(yaxis=dict(autorange="reversed", title="Rank (Lower is Better)"))
+                        # UNIQUE KEY FIX:
+                        st.plotly_chart(fig, use_container_width=True, key=f"line_chart_{loc}_{chart_idx}")
+                    
                     with c2:
-                        st.write("**Month-over-Month**")
+                        st.write("**Monthly Data**")
                         table_data = kw_data[['dt', value_col]].copy()
                         table_data['dt'] = table_data['dt'].dt.strftime('%b %Y')
-                        st.dataframe(table_data, hide_index=True, use_container_width=True)
+                        st.dataframe(table_data, hide_index=True, use_container_width=True, key=f"table_{loc}_{chart_idx}")
