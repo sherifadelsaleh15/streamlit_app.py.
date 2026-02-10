@@ -29,6 +29,7 @@ if not tab_df.empty:
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
     value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'VALUE', 'POSITION'])), None)
     metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['METRIC', 'QUERY', 'KEYWORD'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
     date_col = 'dt'
 
     if value_col:
@@ -40,7 +41,7 @@ if not tab_df.empty:
     if loc_col:
         raw_locs = tab_df[loc_col].dropna().unique()
         all_locs = sorted([str(x) for x in raw_locs], key=lambda x: x != 'Germany')
-        sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
+        sel_locs = st.sidebar.multiselect(f"Filter Region", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
     # --- SIDEBAR: CHAT WITH DATA ---
@@ -57,7 +58,33 @@ if not tab_df.empty:
         st.sidebar.write(f"AI: {chat['a']}")
         st.sidebar.divider()
 
-    # --- GEMINI REPORT SECTION ---
+    # --- TOP 20 LEADERBOARD SECTION ---
+    st.subheader("Performance Leaderboards")
+    col_l, col_r = st.columns(2)
+    
+    with col_l:
+        if page_col and value_col:
+            st.write("Top 20 Pages (GA4)")
+            agg_p = 'min' if is_ranking else 'sum'
+            top_p = tab_df.groupby(page_col)[value_col].agg(agg_p).reset_index()
+            top_p = top_p.sort_values(by=value_col, ascending=(agg_p=='min')).head(20)
+            fig_p = px.bar(top_p, x=value_col, y=page_col, orientation='h', template="plotly_white")
+            if is_ranking: fig_p.update_layout(xaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_p, use_container_width=True, key="top_ga4_pages")
+
+    with col_r:
+        if metric_name_col and value_col:
+            st.write("Top 20 Keywords (GSC)")
+            agg_k = 'min' if is_ranking else 'sum'
+            top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index()
+            top_k = top_k.sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
+            fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', template="plotly_white")
+            if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_k, use_container_width=True, key="top_gsc_keywords")
+
+    st.divider()
+
+    # --- GEMINI REPORT ---
     st.subheader("Strategic AI Report")
     if st.button("Generate Executive Analysis"):
         with st.spinner("Processing..."):
@@ -65,59 +92,48 @@ if not tab_df.empty:
             if value_col and len(tab_df) >= 2:
                 predict_df = tab_df.rename(columns={value_col: 'Value'})
                 sample_forecast = get_prediction(predict_df)
-            
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini", forecast_df=sample_forecast)
     
     if st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
-        st.download_button(
-            label="Download AI Report (TXT)",
-            data=st.session_state.ai_report,
-            file_name=f"Executive_Report_{sel_tab}.txt",
-            mime="text/plain"
-        )
+        st.download_button(label="Download AI Report (TXT)", data=st.session_state.ai_report, file_name=f"Report_{sel_tab}.txt")
 
     st.divider()
 
-    # --- KEYWORD TRENDS & DATA ---
-    st.subheader("Keyword Performance and Projections")
+    # --- KEYWORD DEEP-DIVE (LOCATION & KEYWORD) ---
+    st.subheader("Monthly Performance Trends")
     show_forecast = st.checkbox("Show Scikit-Learn Forecasts", value=True)
     
     if metric_name_col and value_col and date_col in tab_df.columns:
         agg_sort = 'min' if is_ranking else 'sum'
-        top_20 = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
+        top_20_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
         loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
         
         c_idx = 0
         for loc in loc_list:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            st.markdown(f"Region: {loc if loc else 'Global'}")
-            region_keywords = [kw for kw in top_20 if kw in loc_data[metric_name_col].unique()]
+            st.markdown(f"### Region: {loc if loc else 'Global'}")
+            
+            # Show charts for the top 20 keywords present in this location
+            region_keywords = [kw for kw in top_20_list if kw in loc_data[metric_name_col].unique()]
 
             for kw in region_keywords:
                 kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
                 c_idx += 1
                 
-                with st.expander(f"Data for: {kw}", expanded=(loc == 'Germany')):
+                with st.expander(f"Trend for: {kw} in {loc}", expanded=(loc == 'Germany')):
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {kw}")
+                        # Chart title includes Location and Keyword as requested
+                        fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, 
+                                      title=f"Monthly Trend: {kw} ({loc})")
                         
                         if show_forecast and len(kw_data) >= 2:
                             f_in = kw_data.rename(columns={value_col: 'Value'})
                             forecast = get_prediction(f_in)
                             if forecast is not None:
-                                fig.add_trace(go.Scatter(
-                                    x=pd.concat([forecast['ds'], forecast['ds'][::-1]]), 
-                                    y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]), 
-                                    fill='toself', fillcolor='rgba(255,165,0,0.1)', 
-                                    line=dict(color='rgba(255,255,255,0)'), showlegend=False
-                                ))
-                                fig.add_trace(go.Scatter(
-                                    x=forecast['ds'], y=forecast['yhat'], 
-                                    mode='lines', name='Projection', 
-                                    line=dict(color='orange', dash='dash')
-                                ))
+                                fig.add_trace(go.Scatter(x=pd.concat([forecast['ds'], forecast['ds'][::-1]]), y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]), fill='toself', fillcolor='rgba(255,165,0,0.1)', line=dict(color='rgba(255,255,255,0)'), showlegend=False))
+                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
 
                         if is_ranking:
                             fig.update_layout(yaxis=dict(autorange="reversed", title="Rank"))
@@ -130,10 +146,4 @@ if not tab_df.empty:
                         st.dataframe(table_data, hide_index=True, key=f"tbl_{loc}_{c_idx}")
                         
                         csv = table_data.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv,
-                            file_name=f"{kw}_{loc}.csv",
-                            mime="text/csv",
-                            key=f"dl_{loc}_{c_idx}"
-                        )
+                        st.download_button(label="Download CSV", data=csv, file_name=f"{kw}_{loc}.csv", key=f"dl_{loc}_{c_idx}")
