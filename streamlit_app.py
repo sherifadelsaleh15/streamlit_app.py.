@@ -6,7 +6,7 @@ from modules.ai_engine import get_ai_strategic_insight
 
 st.set_page_config(layout="wide")
 
-# 1. Initialize Session State for Chat
+# 1. Initialize Session State for Chat (Must be at the top)
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -26,6 +26,7 @@ if not tab_df.empty:
     # --- REPORT SECTION ---
     st.subheader("Report")
     if st.button("Generate Report"):
+        # Make sure your modules/ai_engine.py is updated with the "Smart Analyst" prompt
         report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
         st.write(report)
         st.download_button("Download Report", report, file_name=f"{sel_tab}_report.txt")
@@ -43,12 +44,13 @@ if not tab_df.empty:
     if "TOP_PAGES" in sel_tab.upper() or "GA4" in sel_tab.upper():
         st.subheader("Top 15 Pages")
         page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL'])), None)
-        # Sum numeric columns to find the most viewed
         num_cols = tab_df.select_dtypes('number').columns
         if page_col and len(num_cols) > 0:
             top_15_df = tab_df.groupby(page_col)[num_cols[0]].sum().sort_values(ascending=False).head(15).reset_index()
             fig_top = px.bar(top_15_df, x=num_cols[0], y=page_col, orientation='h', title="Top 15 Pages")
             st.plotly_chart(fig_top, use_container_width=True)
+            # Added download button for the specific Top 15 chart data
+            st.download_button("Download Top 15 Pages CSV", top_15_df.to_csv(index=False), file_name="top_15_pages.csv")
 
     if "GSC" in sel_tab.upper():
         st.subheader("Top 20 Keywords")
@@ -58,6 +60,8 @@ if not tab_df.empty:
             top_20_df = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
             fig_kw = px.bar(top_20_df, x=click_col, y=kw_col, orientation='h', title="Top 20 Keywords")
             st.plotly_chart(fig_kw, use_container_width=True)
+            # Added download button for the specific Top 20 chart data
+            st.download_button("Download Top 20 Keywords CSV", top_20_df.to_csv(index=False), file_name="top_20_keywords.csv")
 
     # --- MAIN CHART SECTION ---
     st.subheader("Charts")
@@ -65,7 +69,7 @@ if not tab_df.empty:
     metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
     has_value_col = 'Value' in tab_df.columns
 
-    # Dynamic Chart Logic based on Sheet Structure
+    # Dynamic Chart Logic
     if metric_name_col and has_value_col:
         unique_metrics = sorted(tab_df[metric_name_col].unique())
         locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
@@ -78,10 +82,9 @@ if not tab_df.empty:
                     chart_df = loc_data[loc_data[metric_name_col] == met]
                     if not chart_df.empty:
                         with cols[i % 2]:
-                            fig = px.line(chart_df, x='dt', y='Value', title=f"{met} - {loc if loc else ''}")
+                            fig = px.line(chart_df, x='dt', y='Value', title=f"{met} - {loc if loc else ''}", markers=True)
                             st.plotly_chart(fig, use_container_width=True)
     else:
-        # For GA4/GSC: Plot numeric columns (Clicks, Impressions, etc.)
         num_cols = [c for c in tab_df.select_dtypes('number').columns 
                     if not any(x in c.upper() for x in ['ID', 'YEAR', 'MONTH', 'POSITION'])]
         locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
@@ -92,7 +95,7 @@ if not tab_df.empty:
                 cols = st.columns(2)
                 for i, col_name in enumerate(num_cols):
                     with cols[i % 2]:
-                        fig = px.line(loc_data, x='dt', y=col_name, title=f"{col_name} - {loc if loc else ''}")
+                        fig = px.line(loc_data, x='dt', y=col_name, title=f"{col_name} - {loc if loc else ''}", markers=True)
                         st.plotly_chart(fig, use_container_width=True)
 
     # --- SIDEBAR CHAT ---
