@@ -6,7 +6,7 @@ from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
 from utils import get_prediction
 
-st.set_page_config(layout="wide", page_title="Strategic OKR Dashboard")
+st.set_page_config(layout="wide", page_title="2026 Strategy Intelligence Hub")
 
 # 1. Initialize Session State
 if "chat_history" not in st.session_state:
@@ -21,19 +21,27 @@ except Exception as e:
 
 # Sidebar Selection
 sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
-tab_df = df_dict.get(sel_tab, pd.DataFrame())
+tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # --- DYNAMIC COLUMN DETECTION ---
-    # We look for the standardized column names created by our loader
+    # --- FAILSAFE COLUMN DETECTION ---
+    # We find the best match for each required data type
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
-    value_col = next((c for c in tab_df.columns if 'VALUE' in c.upper()), None)
-    metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
-    date_col = 'dt' if 'dt' in tab_df.columns else None
+    
+    # Priority for Value: CLICKS/SESSIONS first, then VALUE/POSITION
+    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION'])), None)
+    
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['METRIC', 'QUERY', 'KEYWORD', 'TERM'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
+    date_col = 'dt' # Standardized by our loader
+
+    # Ensure value_col is actually numeric (Fixes the "0" value/empty chart issue)
+    if value_col:
+        tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
 
     # --- FILTERS ---
     if loc_col:
-        all_locs = sorted(tab_df[loc_col].unique())
+        all_locs = sorted(tab_df[loc_col].unique().tolist())
         sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
@@ -43,7 +51,7 @@ if not tab_df.empty:
         with st.spinner("AI is analyzing trends..."):
             sample_forecast = None
             if value_col and len(tab_df) > 2:
-                # Prepare a sample for the AI using the dynamic value column
+                # Standardize for the prediction utility
                 sample_data = tab_df.rename(columns={value_col: 'Value'})
                 sample_forecast = get_prediction(sample_data.head(20))
                 
@@ -60,32 +68,40 @@ if not tab_df.empty:
 
     # --- TOP LISTS (BAR CHARTS) ---
     col1, col2 = st.columns(2)
+    
+    # Determine if we are looking at Rankings (where lower is better)
+    is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
 
-    # 1. GA4 TOP PAGES
-    if "TOP_PAGES" in sel_tab.upper() or "GA4" in sel_tab.upper():
-        with col1:
-            st.subheader("Top 15 Pages Ranking")
-            page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
-            if page_col and value_col:
-                top_15_df = tab_df.groupby(page_col)[value_col].sum().sort_values(ascending=False).head(15).reset_index()
-                fig_top = px.bar(top_15_df, x=value_col, y=page_col, orientation='h', color=value_col, template="plotly_white")
-                fig_top.update_layout(yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_top, use_container_width=True)
-
-    # 2. GSC KEYWORDS / RANKINGS
-    if "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper():
-        with col2:
-            st.subheader("Top Metrics Comparison")
-            # For SEO rankings, we usually want to see the best (lowest) numbers
-            if "POSITION" in sel_tab.upper():
-                top_data = tab_df.groupby(metric_name_col)[value_col].min().sort_values().head(20).reset_index()
-                fig_kw = px.bar(top_data, x=value_col, y=metric_name_col, orientation='h', template="plotly_white", title="Best Rankings (Top 20)")
-                fig_kw.update_layout(xaxis=dict(autorange="reversed"), yaxis={'categoryorder':'total descending'})
-            else:
-                kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), metric_name_col)
-                top_data = tab_df.groupby(kw_col)[value_col].sum().sort_values(ascending=False).head(20).reset_index()
-                fig_kw = px.bar(top_data, x=value_col, y=kw_col, orientation='h', template="plotly_white")
+    with col1:
+        if page_col and value_col:
+            st.subheader("Top Performance by Page")
+            agg_func = 'min' if is_ranking else 'sum'
+            top_pages = tab_df.groupby(page_col)[value_col].agg(agg_func).reset_index()
+            top_pages = top_pages.sort_values(by=value_col, ascending=(agg_func=='min')).head(15)
             
+            fig_top = px.bar(top_pages, x=value_col, y=page_col, orientation='h', 
+                             color=value_col, template="plotly_white",
+                             color_continuous_scale='Viridis' if is_ranking else 'Blues')
+            
+            if is_ranking:
+                fig_top.update_layout(xaxis=dict(autorange="reversed", title="Best Rank"))
+            
+            st.plotly_chart(fig_top, use_container_width=True)
+
+    with col2:
+        if metric_name_col and value_col:
+            st.subheader("Top Performance by Metric/Keyword")
+            agg_func = 'min' if is_ranking else 'sum'
+            top_metrics = tab_df.groupby(metric_name_col)[value_col].agg(agg_func).reset_index()
+            top_metrics = top_metrics.sort_values(by=value_col, ascending=(agg_func=='min')).head(20)
+            
+            fig_kw = px.bar(top_metrics, x=value_col, y=metric_name_col, orientation='h', 
+                            color=value_col, template="plotly_white",
+                            color_continuous_scale='Viridis' if is_ranking else 'Reds')
+            
+            if is_ranking:
+                fig_kw.update_layout(xaxis=dict(autorange="reversed", title="Best Rank"))
+                
             st.plotly_chart(fig_kw, use_container_width=True)
 
     st.divider()
@@ -94,7 +110,7 @@ if not tab_df.empty:
     st.subheader("Performance Trends & AI Projection")
     show_forecast = st.checkbox("🔮 Show Lightweight Trend Forecast", value=True)
     
-    if metric_name_col and value_col and date_col:
+    if metric_name_col and value_col and date_col in tab_df.columns:
         locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
         
         chart_counter = 0 
@@ -102,23 +118,20 @@ if not tab_df.empty:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             unique_metrics = sorted(loc_data[metric_name_col].unique())
             
-            for met in unique_metrics:
+            # Limit charts to prevent crashing on large datasets
+            for met in unique_metrics[:10]: 
                 chart_df = loc_data[loc_data[metric_name_col] == met].sort_values('dt')
                 if not chart_df.empty:
                     chart_counter += 1
                     with st.container():
                         st.markdown(f"### {met} - {loc if loc else ''}")
                         
-                        # Dynamic Line Chart
                         fig = px.line(chart_df, x='dt', y=value_col, markers=True)
                         
-                        # Invert Y-axis only for SEO Position Tracking (1 is top)
-                        if "POSITION" in sel_tab.upper():
-                            fig.update_layout(yaxis=dict(autorange="reversed", title="Search Rank (Lower is Better)"))
+                        if is_ranking:
+                            fig.update_layout(yaxis=dict(autorange="reversed", title="Search Rank (1 is Top)"))
 
-                        # Add Forecast if enabled
                         if show_forecast and len(chart_df) >= 2:
-                            # Standardize column name for the prediction utility
                             forecast_input = chart_df.rename(columns={value_col: 'Value'})
                             forecast = get_prediction(forecast_input)
                             
@@ -137,7 +150,6 @@ if not tab_df.empty:
                                 ))
 
                         st.plotly_chart(fig, use_container_width=True, key=f"chart_{chart_counter}")
-                        st.write("---")
 
     # --- SIDEBAR CHAT ---
     st.sidebar.divider()
