@@ -140,3 +140,19 @@ if not tab_df.empty:
             st.sidebar.info(f"**You:** {q}")
             st.sidebar.write(f"**AI:** {a}")
             st.sidebar.divider()
+# --- PERFORMANCE TRENDS WITH INVERTED Y-AXIS FOR RANKINGS ---
+# ... (inside your loc/metric loops) ...
+
+# 1. Create the base line chart
+fig = px.line(chart_df, x='dt', y='Value', markers=True)
+
+# 2. Check if this is the Position Tracking tab
+if "POSITION_TRACKING" in sel_tab.upper():
+    # Invert Y-axis so Position 1 is at the top
+    fig.update_layout(yaxis=dict(autorange="reversed", title="Search Position (Lower is Better)"))
+    # Ensure the AI Trend line also respects the inverted axis
+    line_color = 'green' # Green for SEO improvement
+else:
+    line_color = 'orange'
+
+# ... (rest of your go.Scatter forecast logic) ...
