@@ -8,20 +8,32 @@ GEMINI_API_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     """
-    Unified AI Engine with Fixed Gemini Model Path.
+    Unified AI Engine with Fixed Model Strings and Fallback Logic.
     """
     try:
-        # Prepare context
+        # Prepare context (Last 20 rows)
         data_summary = df.tail(20).to_string()
         
+        system_msg = "You are a Senior Strategy Consultant."
         if custom_prompt:
-            system_msg = "You are a fast data assistant."
             user_msg = f"Data: {data_summary}\n\nQuestion: {custom_prompt}"
         else:
-            system_msg = "You are a Senior Strategy Consultant."
-            user_msg = f"Data for {tab_name}: {data_summary}\n\nTask: Provide 3 executive bullet points."
+            user_msg = f"Data for {tab_name}: {data_summary}\n\nTask: Provide 3 executive bullet points on trends and risks."
 
-        # Engine 1: Groq
+        # --- ENGINE: GEMINI ---
+        if engine == "gemini":
+            try:
+                genai.configure(api_key=GEMINI_API_KEY)
+                # Try the standard model name
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response = model.generate_content(user_msg)
+                return response.text
+            except Exception as gem_err:
+                # If Gemini fails, automatically fallback to Groq so the user gets a report
+                st.warning("Gemini model error. Switching to Groq for your report...")
+                engine = "groq"
+
+        # --- ENGINE: GROQ ---
         if engine == "groq":
             client = Groq(api_key=GROQ_API_KEY)
             response = client.chat.completions.create(
@@ -33,16 +45,6 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
                 temperature=0.2
             )
             return response.choices[0].message.content
-
-        # Engine 2: Gemini
-        elif engine == "gemini":
-            genai.configure(api_key=GEMINI_API_KEY)
-            # Use 'gemini-1.5-flash-latest' for better compatibility
-            model = genai.GenerativeModel('gemini-1.5-flash-latest')
-            
-            # Simple content generation
-            response = model.generate_content([system_msg, user_msg])
-            return response.text
 
     except Exception as e:
         return f"❌ AI Engine Error: {str(e)}"
