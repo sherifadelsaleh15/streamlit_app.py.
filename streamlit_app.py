@@ -43,10 +43,24 @@ if not tab_df.empty:
         sel_locs = st.sidebar.multiselect(f"Filter {loc_col}", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
+    # --- SIDEBAR: CHAT WITH DATA ---
+    st.sidebar.divider()
+    st.sidebar.subheader("Chat with Data")
+    user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
+    if user_q:
+        with st.sidebar:
+            ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
+            st.session_state.chat_history.append({"q": user_q, "a": ans})
+    
+    for chat in reversed(st.session_state.chat_history):
+        st.sidebar.info(f"User: {chat['q']}")
+        st.sidebar.write(f"AI: {chat['a']}")
+        st.sidebar.divider()
+
     # --- GEMINI REPORT SECTION ---
-    st.subheader("Gemini Strategic Report")
+    st.subheader("Strategic AI Report")
     if st.button("Generate Executive Analysis"):
-        with st.spinner("Analyzing performance..."):
+        with st.spinner("Processing..."):
             sample_forecast = None
             if value_col and len(tab_df) >= 2:
                 predict_df = tab_df.rename(columns={value_col: 'Value'})
@@ -57,17 +71,17 @@ if not tab_df.empty:
     if st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
         st.download_button(
-            label="Download Gemini Report (TXT)",
+            label="Download AI Report (TXT)",
             data=st.session_state.ai_report,
-            file_name=f"Gemini_Report_{sel_tab}.txt",
+            file_name=f"Executive_Report_{sel_tab}.txt",
             mime="text/plain"
         )
 
     st.divider()
 
-    # --- KEYWORD PERFORMANCE & PREDICTIVE ANALYSIS ---
-    st.subheader("Keyword Performance and Predictive Analysis")
-    show_forecast = st.checkbox("Show Predictive Analysis (Trend Projection)", value=True)
+    # --- KEYWORD TRENDS & DATA ---
+    st.subheader("Keyword Performance and Projections")
+    show_forecast = st.checkbox("Show Scikit-Learn Forecasts", value=True)
     
     if metric_name_col and value_col and date_col in tab_df.columns:
         agg_sort = 'min' if is_ranking else 'sum'
@@ -76,54 +90,3 @@ if not tab_df.empty:
         
         c_idx = 0
         for loc in loc_list:
-            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            st.markdown(f"### Region: {loc if loc else 'Global'}")
-            region_keywords = [kw for kw in top_20 if kw in loc_data[metric_name_col].unique()]
-
-            for kw in region_keywords:
-                kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
-                c_idx += 1
-                
-                with st.expander(f"Trend Analysis: {kw}", expanded=(loc == 'Germany')):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {kw}")
-                        
-                        if show_forecast and len(kw_data) >= 2:
-                            f_in = kw_data.rename(columns={value_col: 'Value'})
-                            forecast = get_prediction(f_in) # Scikit-learn logic
-                            if forecast is not None:
-                                fig.add_trace(go.Scatter(x=pd.concat([forecast['ds'], forecast['ds'][::-1]]), y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]), fill='toself', fillcolor='rgba(255,165,0,0.1)', line=dict(color='rgba(255,255,255,0)'), showlegend=False))
-                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projected Trend', line=dict(color='orange', dash='dash')))
-
-                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed", title="Rank"))
-                        st.plotly_chart(fig, use_container_width=True, key=f"ch_{loc}_{c_idx}")
-                    
-                    with col2:
-                        st.write("Monthly Data Table")
-                        table_data = kw_data[['dt', value_col]].copy()
-                        table_data['dt'] = table_data['dt'].dt.strftime('%b %Y')
-                        st.dataframe(table_data, hide_index=True, key=f"tbl_{loc}_{c_idx}")
-                        
-                        csv = table_data.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv,
-                            file_name=f"{kw}_{loc}_data.csv",
-                            mime="text/csv",
-                            key=f"dl_{loc}_{c_idx}"
-                        )
-
-    # --- CHAT WITH DATA (SIDEBAR) ---
-    st.sidebar.divider()
-    st.sidebar.subheader("Chat with Data")
-    user_q = st.sidebar.text_input("Enter your question:", key="user_input")
-    if user_q:
-        with st.sidebar:
-            ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
-            st.session_state.chat_history.append({"q": user_q, "a": ans})
-    
-    for chat in reversed(st.session_state.chat_history):
-        st.sidebar.info(f"User: {chat['q']}")
-        st.sidebar.write(f"Response: {chat['a']}")
-        st.sidebar.divider()
