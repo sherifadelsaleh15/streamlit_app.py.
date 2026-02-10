@@ -90,3 +90,50 @@ if not tab_df.empty:
         
         c_idx = 0
         for loc in loc_list:
+            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+            st.markdown(f"Region: {loc if loc else 'Global'}")
+            region_keywords = [kw for kw in top_20 if kw in loc_data[metric_name_col].unique()]
+
+            for kw in region_keywords:
+                kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
+                c_idx += 1
+                
+                with st.expander(f"Data for: {kw}", expanded=(loc == 'Germany')):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {kw}")
+                        
+                        if show_forecast and len(kw_data) >= 2:
+                            f_in = kw_data.rename(columns={value_col: 'Value'})
+                            forecast = get_prediction(f_in)
+                            if forecast is not None:
+                                fig.add_trace(go.Scatter(
+                                    x=pd.concat([forecast['ds'], forecast['ds'][::-1]]), 
+                                    y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]), 
+                                    fill='toself', fillcolor='rgba(255,165,0,0.1)', 
+                                    line=dict(color='rgba(255,255,255,0)'), showlegend=False
+                                ))
+                                fig.add_trace(go.Scatter(
+                                    x=forecast['ds'], y=forecast['yhat'], 
+                                    mode='lines', name='Projection', 
+                                    line=dict(color='orange', dash='dash')
+                                ))
+
+                        if is_ranking:
+                            fig.update_layout(yaxis=dict(autorange="reversed", title="Rank"))
+                        st.plotly_chart(fig, use_container_width=True, key=f"ch_{loc}_{c_idx}")
+                    
+                    with col2:
+                        st.write("Monthly Data")
+                        table_data = kw_data[['dt', value_col]].copy()
+                        table_data['dt'] = table_data['dt'].dt.strftime('%b %Y')
+                        st.dataframe(table_data, hide_index=True, key=f"tbl_{loc}_{c_idx}")
+                        
+                        csv = table_data.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="Download CSV",
+                            data=csv,
+                            file_name=f"{kw}_{loc}.csv",
+                            mime="text/csv",
+                            key=f"dl_{loc}_{c_idx}"
+                        )
