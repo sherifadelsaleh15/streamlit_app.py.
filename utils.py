@@ -3,18 +3,15 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 
 def get_prediction(df, periods=4):
-    """
-    Ensures the forecast starts ONLY after the most recent data point.
-    """
     try:
         if len(df) < 2:
             return None
         
-        # 1. Clean and Sort
+        # 1. Prepare Historical Data
         df = df.dropna(subset=['Value', 'dt']).sort_values('dt').copy()
         df['dt'] = pd.to_datetime(df['dt'])
         
-        # 2. Train the model on Historical Data only
+        # 2. Train Model
         df['date_ordinal'] = df['dt'].map(pd.Timestamp.toordinal)
         X = df[['date_ordinal']]
         y = df['Value']
@@ -22,31 +19,40 @@ def get_prediction(df, periods=4):
         model = LinearRegression()
         model.fit(X, y)
         
-        # 3. IDENTIFY THE TRUE FUTURE
-        # We find the last date in your data (e.g., Feb 2026)
-        last_date = df['dt'].max()
+        # 3. Define the "Stitch" Point (The last known actual)
+        last_row = df.iloc[-1]
+        last_date = last_row['dt']
+        last_val = last_row['Value']
         
-        # Create future dates starting from the NEXT month
-        # We use MonthEnd to ensure alignment with your data structure
+        # 4. Generate Future Dates (Starting 1 month after last_date)
         future_dates = [last_date + pd.DateOffset(months=i+1) for i in range(periods)]
         future_ordinals = pd.DataFrame({'date_ordinal': [d.toordinal() for d in future_dates]})
         
-        # 4. Predict
+        # 5. Predict Future Values
         future_pred = model.predict(future_ordinals)
-        
-        # 5. Margin of Error
         std_dev = (y - model.predict(X)).std()
         
-        # 6. Build Forecast (Starting from the first 'empty' month)
+        # 6. Create Forecast DF
         forecast = pd.DataFrame({
             'ds': future_dates,
             'yhat': future_pred,
-            'yhat_lower': future_pred - (std_dev * 1.5), # Slightly wider for realism
-            'yhat_upper': future_pred + (std_dev * 1.5)
+            'yhat_lower': future_pred - (std_dev * 1.2),
+            'yhat_upper': future_pred + (std_dev * 1.2)
         })
+
+        # 7. THE STITCH: Add the last known point to the START of forecast
+        # This makes the orange line connect to the blue line perfectly
+        stitch_row = pd.DataFrame({
+            'ds': [last_date],
+            'yhat': [last_val],
+            'yhat_lower': [last_val],
+            'yhat_upper': [last_val]
+        })
+        
+        forecast = pd.concat([stitch_row, forecast]).reset_index(drop=True)
         
         return forecast
 
     except Exception as e:
-        print(f"Prediction Error: {e}")
+        print(f"Forecasting Error: {e}")
         return None
