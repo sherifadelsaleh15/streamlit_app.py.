@@ -3,11 +3,13 @@ import pandas as pd
 import streamlit as st
 
 def render_metric_chart(df, metric_name):
-    # Find the value column automatically
-    val_col = 'Value' if 'Value' in df.columns else metric_name
+    # Find value column (Value or Views or Clicks)
+    val_col = 'Value' if 'Value' in df.columns else (
+              'Views' if 'Views' in df.columns else (
+              'Clicks' if 'Clicks' in df.columns else df.select_dtypes('number').columns[0]))
+    
     date_col = 'dt' if 'dt' in df.columns else df.columns[0]
-
-    chart_data = df.groupby(date_col)[val_col].sum().reset_index()
+    chart_data = df.groupby(date_col)[val_col].sum().reset_index().sort_values(date_col)
     
     fig = go.Figure(go.Scatter(
         x=chart_data[date_col], y=chart_data[val_col],
@@ -18,14 +20,16 @@ def render_metric_chart(df, metric_name):
     st.plotly_chart(fig, use_container_width=True)
 
 def render_top_pages_table(df):
-    """Specific logic for GSC and GA4 Top Pages"""
-    # Detect if we should use Page Path (GA4) or Keyword (GSC)
-    if 'Page Path' in df.columns:
-        label_col, val_col = 'Page Path', 'Views'
-    elif 'Keyword' in df.columns:
-        label_col, val_col = 'Keyword', 'Clicks'
-    else:
-        return st.info("No Page or Keyword data found in this tab.")
+    """Detects Page Path or Keyword and shows top 10"""
+    label_col = 'Page_Path' if 'Page_Path' in df.columns else (
+                'Keyword' if 'Keyword' in df.columns else None)
+    
+    val_col = 'Views' if 'Views' in df.columns else (
+              'Clicks' if 'Clicks' in df.columns else 'Value')
+
+    if not label_col:
+        st.info("Detailed breakdown not available for this tab.")
+        return
 
     top_data = df.groupby(label_col)[val_col].sum().sort_values(ascending=False).head(10).reset_index()
     
