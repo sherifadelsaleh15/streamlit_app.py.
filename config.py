@@ -1,16 +1,8 @@
 # config.py
+APP_TITLE = "2026 Strategy Intelligence Hub"
 
-# 1. The ID from your Google Sheet URL
+# Your specific Google Sheet ID
 SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
-# 2. The exact names of the tabs in your Google Sheet
-TABS = [
-    "MASTER_FEED", 
-    "GA4_Data", 
-    "GA4_Top_Pages", 
-    "GSC", 
-    "SOCIAL_MEDIA"
-]
-
-# 3. App Customization
-APP_TITLE = "2026 Strategy Intelligence Hub"
+# Names of the tabs in your Google Sheet
+TABS = ["GA4_Data", "GSC_2026_Database", "GA4_Top_Pages_2026", "SOCIAL_MEDIA_VERTICAL"]
