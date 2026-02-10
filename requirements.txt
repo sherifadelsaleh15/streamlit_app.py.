@@ -4,3 +4,4 @@ plotly
 scikit-learn
 groq
 google-generativeai
+prophet
