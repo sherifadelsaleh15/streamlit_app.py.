@@ -2,8 +2,11 @@ import streamlit as st
 
 def apply_custom_css():
     """Loads the CSS file from the assets folder"""
-    with open("assets/styles.css") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    try:
+        with open("assets/styles.css") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except FileNotFoundError:
+        pass
 
 def render_header(title, subtitle):
     """Renders a consistent branded header"""
@@ -17,4 +20,4 @@ def render_header(title, subtitle):
 def render_footer():
     """Renders a simple footer with branding"""
     st.markdown("---")
-    st.caption("🚀 2026 Strategy Intelligence Hub | Confidential Internal Data")
+    st.caption("2026 Strategy Intelligence Hub | Confidential Internal Data")
