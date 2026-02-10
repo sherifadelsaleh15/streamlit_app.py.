@@ -2,32 +2,31 @@ import streamlit as st
 from groq import Groq
 import google.generativeai as genai
 
-# These are the keys you provided
+# Standardize the variable names here
 GROQ_API_KEY = "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"
 GEMINI_API_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     """
-    AI Engine using your provided keys.
-    - Groq (Llama 3): Fast Chat
-    - Gemini (1.5 Flash): Deep Summaries
+    Unified AI Engine:
+    - Groq for Fast Sidebar Chat
+    - Gemini for Deep Executive Summaries
     """
     try:
-        # Standardize data context for the AI
+        # Prepare data context (Last 25 rows for relevance)
         data_summary = df.tail(25).to_string()
         
         if custom_prompt:
-            # Chat Mode (Groq)
-            system_msg = f"You are a fast data assistant. Use this data: {data_summary}"
+            # Mode: Chat (User asking questions)
+            system_msg = f"You are a helpful data assistant. Context: {data_summary}"
             user_msg = custom_prompt
         else:
-            # Report Mode (Gemini)
+            # Mode: Report (Standard Analysis)
             system_msg = "You are a Senior Strategy Consultant."
-            user_msg = f"Based on this data for {tab_name}: {data_summary}, provide 3 executive takeaways."
+            user_msg = f"Analyze these {tab_name} OKRs: {data_summary}. Provide 3 executive bullet points."
 
-        # Engine Logic
+        # Engine 1: Groq (using GROQ_API_KEY)
         if engine == "groq":
-            # Using your Groq Key
             client = Groq(api_key=GROQ_API_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -39,11 +38,12 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
             )
             return response.choices[0].message.content
 
+        # Engine 2: Gemini (using GEMINI_API_KEY)
         elif engine == "gemini":
-            # Using your Gemini Key
-            genai.configure(api_key=GEMINI_KEY)
+            genai.configure(api_key=GEMINI_API_KEY)
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(f"{system_msg}\n\n{user_msg}")
+            # Combine system and user message for Gemini
+            response = model.generate_content(f"{system_msg}\n\nTask: {user_msg}")
             return response.text
 
     except Exception as e:
