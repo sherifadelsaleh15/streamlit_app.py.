@@ -6,7 +6,7 @@ from modules.ai_engine import get_ai_strategic_insight
 
 st.set_page_config(layout="wide")
 
-# 1. INITIALIZE SESSION STATE (Must be at the top)
+# 1. Initialize Session State
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -32,61 +32,63 @@ if not tab_df.empty:
 
     st.divider()
 
+    # --- SPECIALIZED TOP LISTS (GA4 & GSC) ---
+    if "TOP_PAGES" in sel_tab.upper() or "GA4" in sel_tab.upper():
+        st.subheader("Top 15 Pages")
+        page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL'])), None)
+        metric_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['VIEWS', 'SESSIONS', 'USERS'])), tab_df.select_dtypes('number').columns[0])
+        
+        if page_col:
+            top_pages = tab_df.groupby(page_col)[metric_col].sum().sort_values(ascending=False).head(15).reset_index()
+            fig_pages = px.bar(top_pages, x=metric_col, y=page_col, orientation='h', title=f"Top 15 Pages by {metric_col}")
+            fig_pages.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_pages, use_container_width=True)
+            # Note: Users can download this as PNG using the camera icon on the chart
+
+    if "GSC" in sel_tab.upper():
+        st.subheader("Top 20 Keywords")
+        kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+        click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), tab_df.select_dtypes('number').columns[0])
+        
+        if kw_col:
+            top_kw = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
+            fig_kw = px.bar(top_kw, x=click_col, y=kw_col, orientation='h', title=f"Top 20 Keywords by {click_col}")
+            fig_kw.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig_kw, use_container_width=True)
+
+    st.divider()
+
+    # --- MAIN CHART SECTION ---
+    st.subheader("Performance Trends")
+    st.info("Hover over charts and click the Camera icon to download as Image/PDF")
+    
+    # [Logic for individual charts per Location remains same as previous step]
+    # (Inserting the robust chart loop from previous code block here)
+    num_cols = [c for c in tab_df.select_dtypes('number').columns if not any(x in c.upper() for x in ['ID', 'YEAR', 'MONTH'])]
+    locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
+    
+    for loc in locations:
+        loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+        if not loc_data.empty:
+            if loc: st.write(f"Location: {loc}")
+            cols = st.columns(2)
+            for i, col_name in enumerate(num_cols):
+                with cols[i % 2]:
+                    fig = px.line(loc_data, x='dt', y=col_name, title=f"{col_name} - {loc if loc else ''}")
+                    st.plotly_chart(fig, use_container_width=True)
+
     # --- DATA TABLE SECTION ---
     st.subheader("Data Table")
     st.dataframe(tab_df, use_container_width=True)
     st.download_button("Download Table CSV", tab_df.to_csv(index=False), file_name="data_table.csv")
 
-    st.divider()
-
-    # --- CHART SECTION ---
-    st.subheader("Charts")
-    
-    metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
-    has_value_col = 'Value' in tab_df.columns
-
-    # Logic to handle OKR vs GSC/GA4
-    if metric_name_col and has_value_col:
-        unique_metrics = sorted(tab_df[metric_name_col].unique())
-        locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
-        for loc in locations:
-            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            if not loc_data.empty:
-                if loc: st.write(f"Location: {loc}")
-                cols = st.columns(2)
-                for i, met in enumerate(unique_metrics):
-                    chart_df = loc_data[loc_data[metric_name_col] == met]
-                    if not chart_df.empty:
-                        with cols[i % 2]:
-                            fig = px.line(chart_df, x='dt', y='Value', title=f"{met} - {loc if loc else ''}")
-                            st.plotly_chart(fig, use_container_width=True)
-    else:
-        num_cols = [c for c in tab_df.select_dtypes('number').columns 
-                    if not any(x in c.upper() for x in ['ID', 'YEAR', 'MONTH', 'POSITION'])]
-        locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
-        for loc in locations:
-            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            if not loc_data.empty:
-                if loc: st.write(f"Location: {loc}")
-                cols = st.columns(2)
-                for i, col_name in enumerate(num_cols):
-                    if not loc_data[col_name].dropna().empty:
-                        with cols[i % 2]:
-                            fig = px.line(loc_data, x='dt', y=col_name, title=f"{col_name} - {loc if loc else ''}")
-                            st.plotly_chart(fig, use_container_width=True)
-
     # --- SIDEBAR CHAT ---
     st.sidebar.divider()
-    if st.sidebar.button("Reset Chat"):
-        st.session_state.chat_history = []
-        st.rerun()
-
     user_q = st.sidebar.text_input("Ask about data:")
     if user_q:
         ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
         st.session_state.chat_history.append((user_q, ans))
     
-    # Safe loop: only runs if history exists
     if st.session_state.chat_history:
         for q, a in st.session_state.chat_history[::-1]:
             st.sidebar.write(f"User: {q}")
