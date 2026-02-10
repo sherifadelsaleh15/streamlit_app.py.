@@ -1,12 +1,18 @@
 import streamlit as st
 import os
 
+def apply_custom_css():
+    """Applies professional dashboard styling"""
+    css_path = "assets/styles.css"
+    try:
+        if os.path.exists(css_path):
+            with open(css_path) as f:
+                st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    except Exception:
+        pass
+
 def render_sidebar_logo():
-    """
-    Enhanced logo loader that searches multiple common paths 
-    to ensure the logo appears regardless of folder structure.
-    """
-    # List of possible paths to check
+    """Searches for and displays the logo"""
     possible_paths = [
         "assets/images/140x60.png",
         "images/140x60.png",
@@ -24,7 +30,28 @@ def render_sidebar_logo():
         st.sidebar.image(found_path, width=140)
         st.sidebar.markdown("<br>", unsafe_allow_html=True)
     else:
-        # This will only show up if the file is truly missing from GitHub
         st.sidebar.markdown("### Strategy Hub")
-        # For debugging: uncomment the line below to see where it's looking
-        # st.sidebar.write("Debug: Logo not found in any path.")
+
+def render_header(title, subtitle):
+    """Branded header without icons"""
+    st.markdown(f"""
+        <div style="margin-bottom: 2rem;">
+            <h1 style="color: #1e293b; font-size: 2.5rem; font-weight: 800; margin-bottom: 0;">
+                {title}
+            </h1>
+            <p style="color: #64748b; font-size: 1.1rem; margin-top: 5px;">
+                {subtitle}
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+def render_footer():
+    """Clean minimalist footer"""
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown(
+        "<p style='text-align: center; color: #94a3b8; font-size: 0.8rem;'>"
+        "2026 Strategy Intelligence Hub | Confidential Internal Data"
+        "</p>", 
+        unsafe_allow_html=True
+    )
