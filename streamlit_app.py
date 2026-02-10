@@ -21,35 +21,47 @@ tab_df = df_dict.get(sel_tab, pd.DataFrame())
 
 if not tab_df.empty:
     st.sidebar.markdown("---")
+    
+    # 1. Filter Logic (Preserving data if only one objective exists)
+    obj_col = 'Objective_ID' if 'Objective_ID' in tab_df.columns else ('Objective ID' if 'Objective ID' in tab_df.columns else None)
+    if obj_col:
+        unique_objs = sorted(tab_df[obj_col].unique())
+        if len(unique_objs) > 1:
+            sel_objs = st.sidebar.multiselect(f"Filter {obj_col}", unique_objs)
+            if sel_objs:
+                tab_df = tab_df[tab_df[obj_col].isin(sel_objs)]
+
     show_table = st.sidebar.checkbox("📋 Show Raw Data Table", value=False)
     render_pdf_button()
 
-    # Header
+    # Main Header
     render_header(APP_TITLE, f"Performance for {sel_tab}")
 
-    # Top Pages / Keywords Logic
+    # 2. GSC/GA4 Breakdown
     if any(k in sel_tab.upper() for k in ["GA4", "GSC", "TOP_PAGES"]):
-        render_top_pages_table(tab_df)
+        render_top_pages_table(tab_df, sel_tab)
         st.divider()
 
-    # Auto-Charts for Numeric Columns
+    # 3. Automatic Charts
     st.subheader("Performance Over Time")
+    # Identify numeric columns but ignore ID columns
     numeric_cols = tab_df.select_dtypes(include=['number']).columns.tolist()
-    # Filter out columns that shouldn't be charted
-    chart_cols = [c for c in numeric_cols if c not in ['OKR_ID', 'Objective_ID']]
+    chart_cols = [c for c in numeric_cols if not any(x in c.upper() for x in ['ID', 'POS'])]
     
     if chart_cols:
         grid = st.columns(2)
-        for i, col in enumerate(chart_cols[:4]): # Show top 4 metrics
+        for i, col in enumerate(chart_cols[:4]): # Limit to first 4 metrics to keep clean
             with grid[i % 2]:
                 st.write(f"**Metric: {col.replace('_', ' ')}**")
                 render_metric_chart(tab_df, col)
+    else:
+        st.info("No numeric trend data found in this tab.")
 
-    # Raw Data Table
+    # 4. Raw Data Table (Searchable)
     if show_table:
         st.divider()
-        st.subheader("Raw Data Inspection")
-        search = st.text_input("🔍 Filter rows...", "")
+        st.subheader("Detailed Records")
+        search = st.text_input("🔍 Search rows...", "", key="table_search")
         if search:
             display_df = tab_df[tab_df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
         else:
@@ -58,4 +70,4 @@ if not tab_df.empty:
 
     render_footer()
 else:
-    st.error(f"Tab '{sel_tab}' not found or empty. Please check your Google Sheet names.")
+    st.error(f"Tab '{sel_tab}' is currently empty. Please check the sheet names in config.py.")
