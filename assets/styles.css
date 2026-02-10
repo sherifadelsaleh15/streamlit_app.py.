@@ -6,13 +6,13 @@
     font-family: 'Raleway', sans-serif;
 }
 
-/* Force dark text for readability */
+/* Typography */
 h1, h2, h3, p, span, label, .stMarkdown {
     font-family: 'Raleway', sans-serif !important;
     color: #1a1a1a !important;
 }
 
-/* Metric Cards - Light Grey with subtle border */
+/* Metric Cards */
 [data-testid="stMetric"] {
     background-color: #f8fafc;
     border: 1px solid #e2e8f0;
@@ -33,9 +33,16 @@ section[data-testid="stSidebar"] {
     border-right: 1px solid #e2e8f0;
 }
 
-/* Buttons */
-.stButton>button {
-    background-color: #1a1a1a;
-    color: #ffffff !important;
-    border-radius: 6px;
+/* Print Optimization */
+@media print {
+    section[data-testid="stSidebar"], 
+    .stButton, 
+    header, 
+    footer,
+    [data-testid="stToolbar"] {
+        display: none !important;
+    }
+    .main .block-container {
+        padding-top: 1rem !important;
+    }
 }
