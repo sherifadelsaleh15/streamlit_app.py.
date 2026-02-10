@@ -47,7 +47,8 @@ if not tab_df.empty:
         if page_col and len(num_cols) > 0:
             top_15_df = tab_df.groupby(page_col)[num_cols[0]].sum().sort_values(ascending=False).head(15).reset_index()
             fig_top = px.bar(top_15_df, x=num_cols[0], y=page_col, orientation='h', title="Top 15 Pages Ranking")
-            st.plotly_chart(fig_top, use_container_width=True)
+            # FIX: Adding unique key to plotly_chart
+            st.plotly_chart(fig_top, use_container_width=True, key="top_15_chart")
             st.download_button("Download Top 15 Data", top_15_df.to_csv(index=False), file_name="top_15.csv")
 
     if "GSC" in sel_tab.upper():
@@ -57,7 +58,8 @@ if not tab_df.empty:
         if kw_col and click_col:
             top_20_df = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).reset_index()
             fig_kw = px.bar(top_20_df, x=click_col, y=kw_col, orientation='h', title="Top 20 Keywords Ranking")
-            st.plotly_chart(fig_kw, use_container_width=True)
+            # FIX: Adding unique key to plotly_chart
+            st.plotly_chart(fig_kw, use_container_width=True, key="top_20_chart")
             st.download_button("Download Top 20 Data", top_20_df.to_csv(index=False), file_name="top_20.csv")
 
     st.divider()
@@ -67,38 +69,39 @@ if not tab_df.empty:
     
     metric_name_col = next((c for c in tab_df.columns if 'METRIC' in c.upper()), None)
     has_value_col = 'Value' in tab_df.columns
-
-    # Loop through Locations first, then Metrics, to keep everything separate
     locations = sorted(tab_df[loc_col].unique()) if loc_col else [None]
     
+    chart_counter = 0 # Unique ID counter
     for loc in locations:
         loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
         
         if metric_name_col and has_value_col:
-            # OKR Style (Long format)
             unique_metrics = sorted(loc_data[metric_name_col].unique())
             for met in unique_metrics:
                 chart_df = loc_data[loc_data[metric_name_col] == met]
                 if not chart_df.empty:
-                    # Individual container for each OKR
+                    chart_counter += 1
                     with st.container():
                         st.markdown(f"### {met} - {loc if loc else ''}")
                         fig = px.line(chart_df, x='dt', y='Value', markers=True)
-                        st.plotly_chart(fig, use_container_width=True)
-                        # Specific CSV for just this chart
-                        st.download_button(f"Download Data for {met}", chart_df.to_csv(index=False), file_name=f"{met}_{loc}.csv", key=f"dl_{met}_{loc}")
+                        # FIX: Passing a unique key string
+                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{chart_counter}")
+                        st.download_button(f"Download Data for {met}", chart_df.to_csv(index=False), 
+                                         file_name=f"{met}_{loc}.csv", key=f"dl_{chart_counter}")
                         st.write("---")
         else:
-            # GA4/GSC Style (Wide format)
             num_cols = [c for c in loc_data.select_dtypes('number').columns 
                         if not any(x in c.upper() for x in ['ID', 'YEAR', 'MONTH', 'POSITION'])]
             for col_name in num_cols:
                 if not loc_data[col_name].dropna().empty:
+                    chart_counter += 1
                     with st.container():
                         st.markdown(f"### {col_name} - {loc if loc else ''}")
                         fig = px.line(loc_data, x='dt', y=col_name, markers=True)
-                        st.plotly_chart(fig, use_container_width=True)
-                        st.download_button(f"Download Data for {col_name}", loc_data[['dt', col_name]].to_csv(index=False), file_name=f"{col_name}_{loc}.csv", key=f"dl_{col_name}_{loc}")
+                        # FIX: Passing a unique key string
+                        st.plotly_chart(fig, use_container_width=True, key=f"chart_{chart_counter}")
+                        st.download_button(f"Download Data for {col_name}", loc_data[['dt', col_name]].to_csv(index=False), 
+                                         file_name=f"{col_name}_{loc}.csv", key=f"dl_{chart_counter}")
                         st.write("---")
 
     # --- SIDEBAR CHAT ---
