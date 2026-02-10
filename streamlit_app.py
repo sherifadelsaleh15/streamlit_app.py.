@@ -58,29 +58,26 @@ if not tab_df.empty:
         st.sidebar.write(f"AI: {chat['a']}")
         st.sidebar.divider()
 
-    # --- TOP 20 LEADERBOARD SECTION ---
-    st.subheader("Performance Leaderboards")
-    col_l, col_r = st.columns(2)
-    
-    with col_l:
-        if page_col and value_col:
-            st.write("Top 20 Pages (GA4)")
-            agg_p = 'min' if is_ranking else 'sum'
-            top_p = tab_df.groupby(page_col)[value_col].agg(agg_p).reset_index()
-            top_p = top_p.sort_values(by=value_col, ascending=(agg_p=='min')).head(20)
-            fig_p = px.bar(top_p, x=value_col, y=page_col, orientation='h', template="plotly_white")
-            if is_ranking: fig_p.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_p, use_container_width=True, key="top_ga4_pages")
+    # --- SOURCE-SPECIFIC LEADERBOARDS ---
+    # Top 20 Keywords only for GSC
+    if "GSC" in sel_tab.upper() and metric_name_col and value_col:
+        st.subheader("Top 20 GSC Keywords")
+        agg_k = 'min' if is_ranking else 'sum'
+        top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index()
+        top_k = top_k.sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
+        fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', template="plotly_white")
+        if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig_k, use_container_width=True, key="leaderboard_gsc")
 
-    with col_r:
-        if metric_name_col and value_col:
-            st.write("Top 20 Keywords (GSC)")
-            agg_k = 'min' if is_ranking else 'sum'
-            top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index()
-            top_k = top_k.sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
-            fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', template="plotly_white")
-            if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_k, use_container_width=True, key="top_gsc_keywords")
+    # Top 20 Pages only for GA4 Top Pages
+    if "PAGE" in sel_tab.upper() and page_col and value_col:
+        st.subheader("Top 20 GA4 Pages")
+        agg_p = 'min' if is_ranking else 'sum'
+        top_p = tab_df.groupby(page_col)[value_col].agg(agg_p).reset_index()
+        top_p = top_p.sort_values(by=value_col, ascending=(agg_p=='min')).head(20)
+        fig_p = px.bar(top_p, x=value_col, y=page_col, orientation='h', template="plotly_white")
+        if is_ranking: fig_p.update_layout(xaxis=dict(autorange="reversed"))
+        st.plotly_chart(fig_p, use_container_width=True, key="leaderboard_ga4")
 
     st.divider()
 
@@ -100,12 +97,13 @@ if not tab_df.empty:
 
     st.divider()
 
-    # --- KEYWORD DEEP-DIVE (LOCATION & KEYWORD) ---
+    # --- KEYWORD TRENDS (LOCATION + KEYWORD) ---
     st.subheader("Monthly Performance Trends")
     show_forecast = st.checkbox("Show Scikit-Learn Forecasts", value=True)
     
     if metric_name_col and value_col and date_col in tab_df.columns:
         agg_sort = 'min' if is_ranking else 'sum'
+        # Get global top 20 list to keep focus sharp
         top_20_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
         loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
         
@@ -114,7 +112,6 @@ if not tab_df.empty:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.markdown(f"### Region: {loc if loc else 'Global'}")
             
-            # Show charts for the top 20 keywords present in this location
             region_keywords = [kw for kw in top_20_list if kw in loc_data[metric_name_col].unique()]
 
             for kw in region_keywords:
@@ -124,7 +121,6 @@ if not tab_df.empty:
                 with st.expander(f"Trend for: {kw} in {loc}", expanded=(loc == 'Germany')):
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        # Chart title includes Location and Keyword as requested
                         fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, 
                                       title=f"Monthly Trend: {kw} ({loc})")
                         
