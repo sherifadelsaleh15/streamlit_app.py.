@@ -1,45 +1,41 @@
-/* Import Raleway from Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;700;800&display=swap');
 
-/* Apply globally to the App */
+/* Global Background and Font */
 .stApp {
-    background-color: #000000;
+    background-color: #ffffff;
     font-family: 'Raleway', sans-serif;
 }
 
-/* Force Raleway on all headings and text */
-h1, h2, h3, p, span, label, div, .stMarkdown {
+/* Force dark text for readability */
+h1, h2, h3, p, span, label, .stMarkdown {
     font-family: 'Raleway', sans-serif !important;
-    color: #ffffff !important;
+    color: #1a1a1a !important;
 }
 
-/* Professional Metric Cards */
+/* Metric Cards - Light Grey with subtle border */
 [data-testid="stMetric"] {
-    background-color: #0a0a0a;
-    border: 1px solid #262626;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
     padding: 20px;
-    border-radius: 4px; /* Sharper edges for a premium look */
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 [data-testid="stMetricLabel"] {
-    color: #a3a3a3 !important;
-    font-weight: 400;
-    letter-spacing: 1px;
+    color: #64748b !important;
     text-transform: uppercase;
-    font-size: 0.8rem;
+    letter-spacing: 1px;
 }
 
 /* Sidebar Styling */
 section[data-testid="stSidebar"] {
-    background-color: #050505;
-    border-right: 1px solid #171717;
+    background-color: #f1f5f9;
+    border-right: 1px solid #e2e8f0;
 }
 
-/* Style the buttons and inputs to match */
+/* Buttons */
 .stButton>button {
-    font-family: 'Raleway', sans-serif;
-    background-color: #ffffff;
-    color: #000000 !important;
-    border-radius: 4px;
-    font-weight: 700;
+    background-color: #1a1a1a;
+    color: #ffffff !important;
+    border-radius: 6px;
 }
