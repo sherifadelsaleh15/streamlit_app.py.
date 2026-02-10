@@ -14,7 +14,7 @@ apply_custom_css()
 # 1. Load Data
 df_dict = load_and_preprocess_data()
 
-# 2. Sidebar Setup
+# 2. Sidebar Navigation
 render_sidebar_logo()
 sel_tab = st.sidebar.selectbox("Select Strategy Tab", TABS)
 tab_df = df_dict.get(sel_tab, pd.DataFrame())
@@ -22,48 +22,51 @@ tab_df = df_dict.get(sel_tab, pd.DataFrame())
 if not tab_df.empty:
     st.sidebar.markdown("---")
     
-    # --- Objective Filter (RESTORED) ---
-    if 'Objective_ID' in tab_df.columns:
-        all_objs = sorted(tab_df['Objective_ID'].unique())
+    # Objective Filter
+    obj_col = 'Objective_ID' if 'Objective_ID' in tab_df.columns else ('Objective ID' if 'Objective ID' in tab_df.columns else None)
+    if obj_col:
+        all_objs = sorted(tab_df[obj_col].unique())
         sel_objs = st.sidebar.multiselect("Filter Objectives", all_objs, default=all_objs)
         if sel_objs:
-            tab_df = tab_df[tab_df['Objective_ID'].isin(sel_objs)]
+            tab_df = tab_df[tab_df[obj_col].isin(sel_objs)]
 
     show_table = st.sidebar.checkbox("📋 Show Raw Data Table", value=False)
     render_pdf_button()
 
-    # 3. Main Header
-    render_header(APP_TITLE, f"Performance: {sel_tab}")
+    # 3. Header
+    render_header(APP_TITLE, f"Strategic Intelligence: {sel_tab}")
 
-    # 4. Specialized Breakdown (GSC/GA4 Top Pages)
-    if any(k in sel_tab.upper() for k in ["GSC", "TOP_PAGES"]):
+    # 4. AI Strategic Insights Section
+    with st.expander("🤖 View AI Strategic Analysis", expanded=True):
+        numeric_df = tab_df.select_dtypes(include=['number'])
+        if not numeric_df.empty:
+            latest_month = tab_df['dt'].max()
+            current_perf = tab_df[tab_df['dt'] == latest_month].select_dtypes(include=['number']).sum().iloc[0]
+            st.write(f"**Current Status:** Based on latest data from {latest_month.strftime('%B %Y')}, your primary metric is at **{current_perf:,.0f}**.")
+            st.caption("Linear Regression models are currently active on the charts below to project next quarter's performance.")
+
+    # 5. Specialized Analysis (GSC/GA4)
+    if any(k in sel_tab.upper() for k in ["GSC", "TOP_PAGES", "GA4"]):
         render_top_breakdown(tab_df, sel_tab)
         st.divider()
 
-    # 5. Render All Metrics (Dynamic Loop)
-    st.subheader("Monthly Metrics & Trends")
-    
-    # Logic: If tab has 'Metric_Name' column (like GA4_Data or Social), split charts by that.
-    # Otherwise, loop through numeric columns (like Clicks, Avg Position).
+    # 6. All Metrics with Predictive Forecasting
+    st.subheader("Predictive Performance Trends")
     if 'Metric_Name' in tab_df.columns:
         metrics = sorted(tab_df['Metric_Name'].unique())
         cols = st.columns(2)
         for i, m_name in enumerate(metrics):
             m_data = tab_df[tab_df['Metric_Name'] == m_name]
-            val_col = 'Value' if 'Value' in m_data.columns else m_data.select_dtypes('number').columns[0]
             with cols[i % 2]:
-                render_metric_chart(m_data, m_name, val_col, key_suffix=f"{sel_tab}_{i}")
+                render_metric_chart(m_data, m_name, 'Value', key_suffix=f"{sel_tab}_{i}")
     else:
-        # Fallback for tabs without 'Metric_Name' - plot all numeric columns
-        numeric_cols = tab_df.select_dtypes(include=['number']).columns.tolist()
-        # Filter out ID columns
-        chart_metrics = [c for c in numeric_cols if not any(x in c.upper() for x in ['ID', 'POS'])]
+        num_cols = [c for c in tab_df.select_dtypes('number').columns if not any(x in c.upper() for x in ['ID', 'POS'])]
         cols = st.columns(2)
-        for i, m_name in enumerate(chart_metrics):
+        for i, m_name in enumerate(num_cols):
             with cols[i % 2]:
                 render_metric_chart(tab_df, m_name, m_name, key_suffix=f"{sel_tab}_{i}")
 
-    # 6. Raw Data Table
+    # 7. Raw Data
     if show_table:
         st.divider()
         st.subheader("Source Data")
@@ -71,4 +74,4 @@ if not tab_df.empty:
 
     render_footer()
 else:
-    st.error(f"Tab '{sel_tab}' not found or empty. Please check your config.py TABS names.")
+    st.error(f"Tab '{sel_tab}' is empty. Check Google Sheet tab name and link share settings.")
