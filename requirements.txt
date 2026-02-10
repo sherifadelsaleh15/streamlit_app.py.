@@ -1,7 +1,6 @@
 streamlit
 pandas
 plotly
-scikit-learn
+prophet
 groq
 google-generativeai
-prophet
