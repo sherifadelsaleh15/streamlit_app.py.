@@ -6,7 +6,7 @@ import io
 import google.generativeai as genai
 from groq import Groq
 
-# Zero-indentation imports - these must start at the very edge of the file
+# Zero-indentation imports
 from modules.data_loader import load_and_preprocess_data
 from modules.ml_models import generate_forecast
 
@@ -36,7 +36,6 @@ def generate_pdf(report_text, tab_name):
         pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
         pdf.set_font("Arial", size=12)
         pdf.ln(10)
-        # Ensure text is compatible with latin-1
         clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
         pdf.multi_cell(0, 10, txt=clean_text)
         return pdf.output(dest='S').encode('latin-1')
@@ -51,7 +50,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Fallback loop to bypass 404 errors by trying different model strings
+            # Use 1.5-flash as the primary stable model
             for model_name in ['gemini-1.5-flash', 'gemini-pro']:
                 try:
                     model = genai.GenerativeModel(model_name)
