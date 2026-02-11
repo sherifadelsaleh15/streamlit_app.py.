@@ -12,31 +12,55 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
         val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE'])), None)
         metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['METRIC', 'TYPE', 'KEYWORD', 'QUERY'])), None)
+        date_col = 'dt'
 
-        # 2. Build Summary (Fixes the "0 value" reporting issue)
+        # 2. Build Advanced Data Context
         if loc_col and val_col:
-            group_cols = [loc_col]
-            if metric_col:
-                group_cols.append(metric_col)
+            # TOTALS SUMMARY
+            group_total = [loc_col]
+            if metric_col: group_total.append(metric_col)
+            totals_str = df.groupby(group_total)[val_col].sum().reset_index().to_string(index=False)
+
+            # MONTHLY BREAKDOWN SUMMARY (This makes it "Smarter")
+            # We convert dates to string so the AI can read "Jan 2026" easily
+            monthly_df = df.copy()
+            monthly_df['Month'] = monthly_df[date_col].dt.strftime('%b %Y')
             
-            # Aggregate data so the AI sees the total, not just individual rows
-            summary_stats = df.groupby(group_cols)[val_col].sum().reset_index().to_string(index=False)
-            data_context = f"AGGREGATED TOTALS:\n{summary_stats}\n\nRAW DATA SAMPLE:\n{df.head(15).to_string()}"
+            group_month = [loc_col, 'Month']
+            if metric_col: group_month.insert(1, metric_col)
+            
+            monthly_str = monthly_df.groupby(group_month)[val_col].sum().reset_index().to_string(index=False)
+
+            data_context = f"""
+            SYSTEM DATA SUMMARY:
+            
+            [OVERALL TOTALS]:
+            {totals_str}
+            
+            [MONTHLY BREAKDOWN]:
+            {monthly_str}
+            
+            [RAW SAMPLE]:
+            {df.head(10).to_string()}
+            """
         else:
             data_context = df.head(50).to_string()
 
         # 3. Construct Prompts
-        system_msg = "You are a Strategic Data Analyst. Use the 'AGGREGATED TOTALS' section. If a value is shown there, it is the total for that country/metric."
-        user_msg = f"Data Context:\n{data_context}\n\nQuestion: {custom_prompt if custom_prompt else f'Analyze {tab_name}'}"
+        system_msg = """You are a Strategic Data Analyst. 
+        - Use the [MONTHLY BREAKDOWN] to answer questions about specific dates (like January).
+        - Use the [OVERALL TOTALS] for general performance questions.
+        - If the user asks for a specific country not in the raw sample, trust the Breakdown tables provided above.
+        - Be direct, professional, and highlight trends."""
+        
+        user_msg = f"Tab: {tab_name}\nData:\n{data_context}\n\nUser Question: {custom_prompt if custom_prompt else f'Analyze the performance for {tab_name}'}"
 
-        # --- GEMINI ENGINE ---
+        # --- ENGINES ---
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
             model = genai.GenerativeModel(model_name='models/gemini-3-flash-preview')
             response = model.generate_content(f"{system_msg}\n\n{user_msg}")
             return response.text
-
-        # --- GROQ ENGINE ---
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
