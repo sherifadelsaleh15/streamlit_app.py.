@@ -77,7 +77,13 @@ if not tab_df.empty:
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
     # --- MAIN CONTENT ---
-    st.title(f"Strategic View: {sel_tab}")
+    col_title, col_dl = st.columns([4, 1])
+    with col_title:
+        st.title(f"Strategic View: {sel_tab}")
+    with col_dl:
+        # Download button for the entire filtered dataset
+        csv_main = tab_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Download Sheet", data=csv_main, file_name=f"{sel_tab}_data.csv", mime='text/csv')
 
     # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
@@ -92,7 +98,8 @@ if not tab_df.empty:
             fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
                               color_discrete_sequence=['#4285F4' if is_gsc else '#34A853'])
             if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_main, use_container_width=True)
+            # Chart includes high-res download config
+            st.plotly_chart(fig_main, use_container_width=True, config={'toImageButtonOptions': {'format': 'png', 'scale': 2}})
 
     st.divider()
 
@@ -103,6 +110,7 @@ if not tab_df.empty:
             st.session_state.ai_report = get_ai_insight(tab_df, sel_tab)
     if "ai_report" in st.session_state and st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
+        st.download_button("📥 Download AI Report", st.session_state.ai_report, file_name=f"AI_Report_{sel_tab}.txt")
 
     st.divider()
 
@@ -119,13 +127,11 @@ if not tab_df.empty:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.markdown(f"## Region: {loc if loc else 'Global'}")
             
-            # Identify Top 10 items
             top_region_items = loc_data.groupby(item_col)[value_col].sum().sort_values(ascending=False).head(10).index.tolist()
 
             for item in top_region_items:
                 item_data = loc_data[loc_data[item_col] == item].sort_values('dt')
                 
-                # Dynamic Expander Label
                 if is_gsc and pos_col:
                     label = f"Keyword: {item} | Clicks: {item_data[click_col].sum()} | Avg Pos: {round(item_data[pos_col].mean(), 1)}"
                 else:
@@ -135,18 +141,15 @@ if not tab_df.empty:
                     col1, col2 = st.columns([3, 1])
                     with col1:
                         if is_gsc and pos_col and click_col:
-                            # --- GSC DUAL AXIS CHART ---
                             fig = go.Figure()
                             fig.add_trace(go.Scatter(x=item_data['dt'], y=item_data[click_col], name="Clicks", line=dict(color='#4285F4', width=3)))
                             fig.add_trace(go.Scatter(x=item_data['dt'], y=item_data[pos_col], name="Avg Position", yaxis="y2", line=dict(color='#DB4437', dash='dot')))
                             fig.update_layout(
-                                template="plotly_white",
-                                yaxis=dict(title="Clicks"),
+                                template="plotly_white", yaxis=dict(title="Clicks"),
                                 yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"),
                                 legend=dict(orientation="h", y=1.1)
                             )
                         else:
-                            # --- STANDARD LINE CHART ---
                             fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {item}")
                         
                         if show_forecast and len(item_data) >= 3:
@@ -156,13 +159,19 @@ if not tab_df.empty:
                                 fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
                         
                         if is_ranking and not (is_gsc and pos_col): fig.update_layout(yaxis=dict(autorange="reversed"))
-                        st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{item}")
+                        # Chart includes high-res download config
+                        st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{item}", config={'toImageButtonOptions': {'format': 'png', 'scale': 2}})
                     
                     with col2:
                         st.write("Monthly Stats")
                         cols_to_show = ['dt', value_col]
                         if is_gsc and pos_col: cols_to_show.append(pos_col)
                         table_view = item_data[cols_to_show].copy()
+                        
+                        # Download button for individual keyword/page data
+                        csv_item = table_view.to_csv(index=False).encode('utf-8')
+                        st.download_button("Export Stats", data=csv_item, file_name=f"{item}_stats.csv", key=f"dl_{loc}_{item}")
+                        
                         table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
                         st.dataframe(table_view, hide_index=True)
 
