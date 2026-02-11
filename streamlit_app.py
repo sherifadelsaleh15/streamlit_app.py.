@@ -19,39 +19,49 @@ GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- HELPER FUNCTIONS ---
 def get_ai_insight(df, tab_name):
-    """Gemini Token & Rate Limit Fix targeting 3-Flash."""
+    """
+    Fixed Model Targeting:
+    Uses 'gemini-1.5-flash' (most stable) with 'gemini-3-flash-preview' fallback.
+    If Gemini Quota/404 occurs, it automatically fails over to Grok.
+    """
     try:
-        # 1. RPM Limit Check (ensuring ~5 requests per minute)
+        # 1. RPM Limit Check
         if "last_gemini_call" in st.session_state:
             elapsed = time.time() - st.session_state.last_gemini_call
             if elapsed < 12: 
                 return "⚠️ Rate limit safety: Please wait a few seconds before generating another report."
 
-        # 2. TPM Limit Check: Compress data to minimize input tokens
+        # 2. Data Compression
         cols_to_send = [c for c in df.columns if c in ['dt', 'Location', 'Value', 'Users', 'Metric', 'Country']]
         data_summary = df[cols_to_send].head(15).to_string(index=False)
         
-        # TARGETING 1.5-FLASH (matches your dashboard availability)
-        genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        
         prompt = (f"Senior Strategic Analyst. Analyze: {tab_name} data:\n{data_summary}\n"
                   "Provide 3 hyper-concise executive bullet points.")
+
+        # 3. Model Logic
+        genai.configure(api_key=GEMINI_KEY)
         
+        # We try 1.5-flash first as it's the standard ID for the 'Flash' tier in your dashboard
         try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(prompt)
             st.session_state.last_gemini_call = time.time()
             return response.text
         except Exception as gemini_err:
-            # AUTO-FALLBACK TO GROK IF GEMINI QUOTA IS HIT
-            if "429" in str(gemini_err) or "quota" in str(gemini_err).lower():
+            # If 1.5 fails, try the specific 3-flash preview ID
+            try:
+                model = genai.GenerativeModel('gemini-3-flash-preview')
+                response = model.generate_content(prompt)
+                st.session_state.last_gemini_call = time.time()
+                return response.text
+            except:
+                # FINAL FALLBACK: GROK (Llama 3)
                 client = Groq(api_key=GROQ_KEY)
                 fallback_res = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}]
                 )
                 return f"**[Strategic Fallback Report]**\n\n{fallback_res.choices[0].message.content}"
-            raise gemini_err
 
     except Exception as e: 
         return f"AI Error: {str(e)}"
