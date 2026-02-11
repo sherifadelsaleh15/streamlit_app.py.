@@ -26,9 +26,9 @@ def get_ai_insight(df, tab_name):
         for m_name in model_options:
             try:
                 model = genai.GenerativeModel(m_name)
-                response = model.generate_content(f"Strategic Analyst. Analyze {tab_name} data:\n{data_summary}")
+                response = model.generate_content(f"Senior Strategic Analyst. Analyze: {tab_name} data:\n{data_summary}")
                 return response.text
-            except Exception: continue
+            except: continue
         return "AI Error: Model endpoints unavailable."
     except Exception as e: return f"AI Error: {str(e)}"
 
@@ -56,7 +56,7 @@ if not tab_df.empty:
     # --- FAILSAFE COLUMN DETECTION ---
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
     value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
-    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
     page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
     is_ranking = value_col and 'POSITION' in value_col.upper()
@@ -70,65 +70,77 @@ if not tab_df.empty:
     # --- MAIN CONTENT ---
     st.title(f"Strategic View: {sel_tab}")
 
+    # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
     with M:
-        # Top chart logic (remains centered)
-        p_col = page_col if page_col else metric_name_col
-        if p_col and value_col:
-            st.subheader(f"Top 20 {p_col} by {value_col}")
-            top_p = tab_df.groupby(p_col)[value_col].sum().reset_index().sort_values(by=value_col, ascending=True).tail(20)
-            fig_p = px.bar(top_p, x=value_col, y=p_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'], text=value_col)
-            st.plotly_chart(fig_p, use_container_width=True)
+        # Combined GSC/GA4 Logic for Main Chart
+        display_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
+        if display_col and value_col:
+            st.subheader(f"Top 20 {display_col} by {value_col}")
+            agg_method = 'min' if is_ranking else 'sum'
+            top_df = tab_df.groupby(display_col)[value_col].agg(agg_method).reset_index()
+            top_df = top_df.sort_values(by=value_col, ascending=(agg_method=='min')).head(20)
+            
+            fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
+                              color_discrete_sequence=['#4285F4' if "GSC" in sel_tab.upper() else '#34A853'])
+            if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_main, use_container_width=True)
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS (BY REGION -> BY PAGE) ---
+    # --- STRATEGIC AI REPORT ---
+    st.subheader("Strategic AI Report")
+    if st.button("Generate Executive Analysis"):
+        with st.spinner("Analyzing..."):
+            st.session_state.ai_report = get_ai_insight(tab_df, sel_tab)
+    if "ai_report" in st.session_state and st.session_state.ai_report:
+        st.markdown(st.session_state.ai_report)
+
+    st.divider()
+
+    # --- MONTHLY PERFORMANCE TRENDS (REGION > PAGE/KEYWORD) ---
     st.subheader("Monthly Performance Trends")
     show_forecast = st.checkbox("Show AI Projections", value=True)
     
-    # Identify which column represents the "Page" or "Keyword"
-    trend_item_col = page_col if page_col else metric_name_col
+    # Define what the individual items are (Pages for GA4, Keywords for GSC)
+    item_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
 
-    if trend_item_col and value_col and date_col in tab_df.columns:
-        # Get regions (Germany first)
+    if item_col and value_col and date_col in tab_df.columns:
+        # Get unique regions
         loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
 
         for loc in loc_list:
-            # 1. Filter data to ONLY this region
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            
             st.markdown(f"## Region: {loc if loc else 'Global'}")
             
-            # 2. Find the top 10 most visited pages/items ONLY for this region
-            top_pages_in_region = (
-                loc_data.groupby(trend_item_col)[value_col]
+            # Identify Top 10 items FOR THIS REGION ONLY
+            top_region_items = (
+                loc_data.groupby(item_col)[value_col]
                 .sum()
                 .sort_values(ascending=False)
                 .head(10)
                 .index.tolist()
             )
 
-            # 3. Create an expander for each of those top pages
-            for page in top_pages_in_region:
-                page_data = loc_data[loc_data[trend_item_col] == page].sort_values(date_col)
+            for item in top_region_items:
+                item_data = loc_data[loc_data[item_col] == item].sort_values('dt')
                 
-                with st.expander(f"📊 {page} ({value_col}: {page_data[value_col].sum()})", expanded=False):
-                    c1, c2 = st.columns([3, 1])
-                    with c1:
-                        fig = px.line(page_data, x=date_col, y=value_col, markers=True, height=300, title=f"Trend for {page}")
-                        if show_forecast and len(page_data) >= 3:
-                            f_in = page_data.rename(columns={value_col: 'Value', date_col: 'ds'})
+                with st.expander(f"Data for: {item} | Views: {item_data[value_col].sum()}", expanded=(loc == 'Germany')):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {item}")
+                        
+                        if show_forecast and len(item_data) >= 3:
+                            f_in = item_data.rename(columns={value_col: 'Value', 'dt': 'ds'})
                             forecast = get_prediction(f_in)
                             if forecast is not None:
-                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='AI Projection', line=dict(color='orange', dash='dash')))
-                        st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{page}")
+                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
+                        
+                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
+                        st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{item}")
                     
-                    with c2:
-                        st.write("Monthly Breakdown")
-                        display_df = page_data[[date_col, value_col]].copy()
-                        display_df[date_col] = display_df[date_col].dt.strftime('%b %Y')
-                        st.dataframe(display_df, hide_index=True)
-            st.write("---") # Visual separator between regions
-
-else:
-    st.info("No data available for the selected view.")
+                    with col2:
+                        st.write("Monthly Stats")
+                        table_view = item_data[['dt', value_col]].copy()
+                        table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
+                        st.dataframe(table_view, hide_index=True)
