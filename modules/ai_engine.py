@@ -4,8 +4,8 @@ import google.generativeai as genai
 
 # --- SECURE API HANDLING ---
 # This prevents the app from crashing if secrets aren't set yet
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = st.secrets.get("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, "")
+GEMINI_API_KEY = st.secrets.get("AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0, "")
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
