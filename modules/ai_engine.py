@@ -2,43 +2,41 @@ import streamlit as st
 from groq import Groq
 import google.generativeai as genai
 
-# --- SECURE API HANDLING ---
-# We retrieve the key by its NAME in the secrets.toml file.
-# Do NOT paste the actual gsk_ or AIza... strings here.
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+# --- API KEY CONFIGURATION ---
+# I have added your keys here as requested to prevent connection errors.
+GROQ_KEY = "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"
+GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
-        # Pre-processing data context
+        # Prepare a small data sample for the AI to read
         data_summary = df.head(30).to_string() 
         
         system_msg = (
-            "You are a Strategic Data Analyst. "
-            "Analyze the following data trends carefully. "
-            "Identify growth opportunities and potential risks."
+            "You are a Strategic Data Analyst for 2026 trends. "
+            "Analyze the data provided and give clear, professional insights."
         )
 
         user_msg = (
             f"Question: {custom_prompt}\n\nData Context:\n{data_summary}" 
             if custom_prompt else 
-            f"Summarize trends for {tab_name}:\n{data_summary}"
+            f"Please summarize the main trends for the {tab_name} dataset:\n{data_summary}"
         )
 
         # --- GEMINI LOGIC ---
-        if engine == "gemini" and GEMINI_API_KEY:
+        if engine == "gemini":
             try:
-                genai.configure(api_key=GEMINI_API_KEY)
+                genai.configure(api_key=GEMINI_KEY)
                 model = genai.GenerativeModel('gemini-1.5-flash')
                 response = model.generate_content(f"{system_msg}\n\n{user_msg}")
                 return response.text
             except Exception as e:
-                return f"Gemini Error: {str(e)}"
+                return f"Gemini connection failed: {str(e)}"
 
-        # --- GROQ LOGIC ---
-        if GROQ_API_KEY:
+        # --- GROQ LOGIC (Chat with Data) ---
+        if engine == "groq":
             try:
-                client = Groq(api_key=GROQ_API_KEY)
+                client = Groq(api_key=GROQ_KEY)
                 response = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
@@ -48,9 +46,9 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
                 )
                 return response.choices[0].message.content
             except Exception as e:
-                return f"Groq Error: {str(e)}"
+                return f"Groq connection failed: {str(e)}"
         
-        return "Missing API configuration. Please check Streamlit Secrets."
-
     except Exception as e:
-        return f"AI Engine Exception: {str(e)}"
+        return f"AI Engine Error: {str(e)}"
+
+    return "AI Engine not initialized."
