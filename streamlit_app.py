@@ -9,7 +9,7 @@ from utils import get_prediction
 from groq import Groq
 import google.generativeai as genai
 
-# PDF Library Import
+# Safe PDF Import
 try:
     from fpdf import FPDF
     PDF_SUPPORT = True
@@ -23,7 +23,7 @@ st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
-# PDF GENERATOR
+# PDF HELPER
 def generate_pdf(report_text, tab_name):
     if not PDF_SUPPORT:
         return None
@@ -37,7 +37,7 @@ def generate_pdf(report_text, tab_name):
     pdf.multi_cell(0, 10, txt=clean_text)
     return pdf.output(dest='S').encode('latin-1')
 
-# AI LOGIC ENGINE WITH FALLBACK
+# CORE AI ENGINE
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     try:
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
@@ -45,43 +45,81 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
         metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['METRIC', 'TYPE', 'KEYWORD', 'QUERY'])), None)
         date_col = 'dt'
 
+        # Build Advanced Data Context
         if loc_col and val_col:
             monthly_df = df.copy()
             monthly_df['Month'] = monthly_df[date_col].dt.strftime('%b %Y')
+            
+            # Regional Comparison Matrix
             comparison_matrix = monthly_df.groupby([loc_col, 'Month', metric_col if metric_col else loc_col])[val_col].sum().unstack(level=0).fillna(0)
+            
+            # Totals per region
             group_total = [loc_col]
             if metric_col: group_total.append(metric_col)
             totals_str = df.groupby(group_total)[val_col].sum().reset_index().to_string(index=False)
-            data_context = f"DATA SUMMARY:\nMATRIX:\n{comparison_matrix.to_string()}\n\nTOTALS:\n{totals_str}"
+            
+            # Monthly breakdown
+            monthly_breakdown = monthly_df.groupby(['Month', loc_col])[val_col].sum().reset_index().to_string(index=False)
+            
+            data_context = f"""
+SYSTEM STRATEGIC DATA:
+
+[REGIONAL COMPARISON MATRIX (Monthly)]:
+{comparison_matrix.to_string()}
+
+[MONTHLY BREAKDOWN BY REGION]:
+{monthly_breakdown}
+
+[LIFETIME TOTALS PER REGION]:
+{totals_str}
+
+[RAW SAMPLE - Last 10 rows]:
+{df.tail(10).to_string()}
+"""
         else:
             data_context = df.head(50).to_string()
 
-        system_msg = "Senior Strategic Analyst. Compare performance across regions and provide business implications."
-        user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else f'Analyze performance for {tab_name}'}"
+        # Enhanced Comparison Instructions
+        system_msg = """You are a Senior Strategic Analyst. 
+- When asked to compare countries, use the COMPARISON MATRIX to find differences in growth, volume, and monthly trends.
+- Identify which market is leading and which is lagging.
+- If data for a month is 0 in the matrix, interpret it as 'No Activity' for that specific period.
+- Be critical: don't just state the numbers, explain what the gap between markets means for the business.
+- Provide actionable strategic recommendations based on the data patterns observed."""
+
+        user_msg = f"Dashboard Tab: {tab_name}\n\nUser Question: {custom_prompt if custom_prompt else f'Compare the regional performance in {tab_name} and provide strategic recommendations.'}"
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
             
-            # ATTEMPT FALLBACK TO BYPASS 404 ERRORS
-            # We try the most likely working model strings in order
-            model_options = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-            last_err = ""
-            
-            for model_name in model_options:
+            # FIXED: Use 'models/gemini-1.5-flash' format for v1beta API
+            # OR use the simpler 'gemini-pro' which is more stable
+            try:
+                # Try gemini-1.5-flash first
+                model = genai.GenerativeModel('models/gemini-1.5-flash')
+                response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}")
+            except Exception as e1:
                 try:
-                    model = genai.GenerativeModel(model_name)
-                    response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nContext:\n{data_context}")
-                    return response.text
-                except Exception as e:
-                    last_err = str(e)
-                    continue
-            return f"Gemini Connection Error: {last_err}"
-
+                    # Fallback to gemini-1.5-flash without 'models/' prefix
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}")
+                except Exception as e2:
+                    try:
+                        # Final fallback to gemini-pro (most stable)
+                        model = genai.GenerativeModel('gemini-pro')
+                        response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}")
+                    except Exception as e3:
+                        return f"AI Logic Error: Gemini API failed. Tried multiple models. Latest error: {str(e3)}"
+            
+            return response.text
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\n\nContext:\n{data_context}"}]
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"{user_msg}\n\nData Context:\n{data_context}"}
+                ]
             )
             return response.choices[0].message.content
     except Exception as e:
@@ -104,12 +142,12 @@ def check_password():
 if not check_password():
     st.stop()
 
-# Session State Persistence
+# Session State
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 if "ai_report" not in st.session_state: st.session_state.ai_report = ""
 if "last_chat_input" not in st.session_state: st.session_state.last_chat_input = ""
 
-# Data Loading
+# Load Data
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
@@ -136,7 +174,7 @@ if not tab_df.empty:
         sel_locs = st.sidebar.multiselect("Filter Regions", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # Sidebar Export Tools
+    # Sidebar Downloads
     st.sidebar.divider()
     st.sidebar.subheader("Export Options")
     if st.session_state.ai_report and PDF_SUPPORT:
@@ -147,17 +185,17 @@ if not tab_df.empty:
         import xlsxwriter
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            tab_df.to_excel(writer, index=False, sheet_name='Strategic_Data')
-        st.sidebar.download_button("Export Data to Excel", data=output.getvalue(), file_name=f"Data_Export_{sel_tab}.xlsx")
+            tab_df.to_excel(writer, index=False, sheet_name='Data')
+        st.sidebar.download_button("Export Data to Excel", data=output.getvalue(), file_name=f"Data_{sel_tab}.xlsx")
     except ImportError:
         pass
 
-    # Sidebar Interaction
+    # Sidebar Chat
     st.sidebar.divider()
     st.sidebar.subheader("Data Chat")
     user_q = st.sidebar.text_input("Ask a question", key="chat_input")
     
-    # State check to prevent Groq from re-firing during Gemini report generation
+    # Only run Groq if the question has actually changed
     if user_q and user_q != st.session_state.last_chat_input:
         ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
         st.session_state.chat_history.append({"q": user_q, "a": ans})
@@ -167,7 +205,7 @@ if not tab_df.empty:
         st.sidebar.text(f"User: {chat['q']}")
         st.sidebar.info(chat['a'])
 
-    # Main Dashboard Area
+    # Main Visuals
     st.title(f"Strategic View: {sel_tab}")
     
     if "GSC" in sel_tab.upper() and metric_name_col:
@@ -176,34 +214,35 @@ if not tab_df.empty:
         top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index().sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
         fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h')
         if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_k, use_container_width=True, key="bar_chart_main")
+        st.plotly_chart(fig_k, use_container_width=True, key="main_bar_chart")
 
-    # Strategic Report (Gemini)
+    # Gemini Report
     st.divider()
     st.subheader("Strategic AI Report")
-    if st.button("Generate Executive Analysis"):
-        with st.spinner("Processing analysis..."):
+    if st.button("Generate Analysis"):
+        with st.spinner("Analyzing with Gemini..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
             st.rerun()
     
     if st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
 
-    # Monthly Trends
+    # Trends Loop
     st.divider()
-    st.subheader("Performance Trends")
+    st.subheader("Monthly Performance Trends")
     if metric_name_col and value_col and date_col in tab_df.columns:
         agg_sort = 'min' if is_ranking else 'sum'
         top_20_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
 
-        for l_idx, loc in enumerate(tab_df[loc_col].unique() if loc_col else [None]):
+        for loc_idx, loc in enumerate(tab_df[loc_col].unique() if loc_col else [None]):
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.write(f"Region: {loc if loc else 'Global'}")
             region_keywords = [kw for kw in top_20_list if kw in loc_data[metric_name_col].unique()]
 
-            for k_idx, kw in enumerate(region_keywords):
+            for kw_idx, kw in enumerate(region_keywords):
                 kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
-                with st.expander(f"Trend data: {kw}"):
-                    fig = px.line(kw_data, x='dt', y=value_col, markers=True, title=f"Trend Analysis: {kw}")
+                with st.expander(f"Data for: {kw}"):
+                    fig = px.line(kw_data, x='dt', y=value_col, markers=True, title=f"Trend: {kw}")
                     if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
-                    st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{l_idx}_{k_idx}")
+                    # Added unique keys to prevent DuplicateElementId error
+                    st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc_idx}_{kw_idx}")
