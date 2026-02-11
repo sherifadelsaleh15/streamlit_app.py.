@@ -22,9 +22,19 @@ def get_ai_insight(df, tab_name):
     try:
         data_summary = df.head(15).to_string()
         genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(f"Analyze this {tab_name} data and provide strategic implications:\n{data_summary}")
-        return response.text
+        
+        # FIX: Try multiple model strings to avoid the 404 error
+        model_options = ['gemini-1.5-flash', 'gemini-pro']
+        for m_name in model_options:
+            try:
+                model = genai.GenerativeModel(m_name)
+                response = model.generate_content(
+                    f"Senior Strategic Analyst. Analyze this {tab_name} data and provide strategic implications:\n{data_summary}"
+                )
+                return response.text
+            except Exception:
+                continue
+        return "AI Error: Model not available. Check API key status."
     except Exception as e:
         return f"AI Error: {str(e)}"
 
@@ -46,6 +56,7 @@ except Exception as e:
     st.stop()
 
 # 4. Sidebar Navigation
+# This list() ensures all successfully loaded tabs (including GA4_Data) appear
 sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
@@ -94,7 +105,7 @@ if not tab_df.empty:
             st.plotly_chart(fig_k, use_container_width=True)
 
     with col_lead2:
-        if ("GA4" in sel_tab.upper() or "PAGE" in sel_tab.upper()) and page_col and value_col:
+        if ("GA4" in sel_tab.upper() or "PAGE" in sel_tab.upper() or "DATA" in sel_tab.upper()) and page_col and value_col:
             st.subheader("Top 20 GA4 Pages")
             top_p = tab_df.groupby(page_col)[value_col].sum().reset_index()
             top_p = top_p.sort_values(by=value_col, ascending=False).head(20)
