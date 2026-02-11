@@ -25,15 +25,20 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
         if engine == "gemini":
             try:
                 genai.configure(api_key=GEMINI_KEY)
-                # Using 'gemini-pro' as it is the most stable endpoint for generateContent
-                model = genai.GenerativeModel('gemini-pro')
+                
+                # Using the explicit model path to bypass versioning conflicts
+                # 'models/gemini-1.5-flash' is the most compatible for 2026
+                model = genai.GenerativeModel(model_name='models/gemini-1.5-flash')
+                
                 response = model.generate_content(f"{system_msg}\n\n{user_msg}")
                 return response.text
             except Exception as e:
-                # If 'gemini-pro' fails, it might be a library version issue
-                return f"Gemini connection failed. Error: {str(e)}. Try updating your google-generativeai library."
+                # This block will now help you debug by listing what your API can actually see
+                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                return (f"Gemini 404 Error. Your API key supports these models: {available_models}. "
+                        f"Technical details: {str(e)}")
 
-        # --- GROQ LOGIC (Chat with Data) ---
+        # --- GROQ LOGIC ---
         if engine == "groq":
             try:
                 client = Groq(api_key=GROQ_KEY)
