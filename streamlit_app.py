@@ -33,12 +33,11 @@ def generate_pdf(report_text, tab_name):
     pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
     pdf.set_font("Arial", size=12)
     pdf.ln(10)
-    # Filter text for latin-1 compatibility
     clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
     pdf.multi_cell(0, 10, txt=clean_text)
     return pdf.output(dest='S').encode('latin-1')
 
-# AI LOGIC ENGINE
+# AI LOGIC ENGINE WITH FALLBACK
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     try:
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
@@ -62,10 +61,22 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Fix: Using model name without 'models/' prefix to resolve 404
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nContext:\n{data_context}")
-            return response.text
+            
+            # ATTEMPT FALLBACK TO BYPASS 404 ERRORS
+            # We try the most likely working model strings in order
+            model_options = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+            last_err = ""
+            
+            for model_name in model_options:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nContext:\n{data_context}")
+                    return response.text
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+            return f"Gemini Connection Error: {last_err}"
+
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
@@ -118,7 +129,7 @@ if not tab_df.empty:
 
     is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
 
-    # Sidebar Navigation and Filters
+    # Sidebar Filters
     if loc_col:
         raw_locs = tab_df[loc_col].dropna().unique()
         all_locs = sorted([str(x) for x in raw_locs], key=lambda x: x != 'Germany')
@@ -130,7 +141,7 @@ if not tab_df.empty:
     st.sidebar.subheader("Export Options")
     if st.session_state.ai_report and PDF_SUPPORT:
         pdf_bytes = generate_pdf(st.session_state.ai_report, sel_tab)
-        st.sidebar.download_button("Download PDF Report", data=pdf_bytes, file_name=f"Strategic_Report_{sel_tab}.pdf")
+        st.sidebar.download_button("Download PDF Report", data=pdf_bytes, file_name=f"Report_{sel_tab}.pdf")
     
     try:
         import xlsxwriter
@@ -195,6 +206,4 @@ if not tab_df.empty:
                 with st.expander(f"Trend data: {kw}"):
                     fig = px.line(kw_data, x='dt', y=value_col, markers=True, title=f"Trend Analysis: {kw}")
                     if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
-                    # Unique keys to prevent StreamlitDuplicateElementId error
                     st.plotly_chart(fig, use_container_width=True, key=f"trend_chart_{l_idx}_{k_idx}")
-                    
