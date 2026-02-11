@@ -29,7 +29,7 @@ except Exception as e:
 sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
-# 5. Routing to Specialized Files
+# 5. Routing Logic (Preserving your specific layouts)
 if not tab_df.empty:
     if "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper():
         from tabs.gsc_tab import render_gsc_tab
