@@ -55,10 +55,13 @@ if not tab_df.empty:
     # --- SPECIFIC COLUMN DETECTION ---
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'LOCATION'])), None)
     
-    # Identify Clicks AND Position for GSC
+    # Identify Clicks vs Position
     click_col = next((c for c in tab_df.columns if 'CLICK' in c.upper()), None)
     pos_col = next((c for c in tab_df.columns if 'POSITION' in c.upper() or 'RANK' in c.upper()), None)
-    kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+    
+    # Logic: If GSC, prioritize Clicks for the main chart
+    primary_val = click_col if click_col else pos_col
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
     date_col = 'dt'
 
     # --- SIDEBAR FILTERS ---
@@ -67,53 +70,33 @@ if not tab_df.empty:
         sel_locs = st.sidebar.multiselect(f"Filter Region", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # --- SIDEBAR: CHAT WITH DATA ---
-    st.sidebar.divider()
-    st.sidebar.subheader("Chat with Data")
-    user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
-    if user_q:
-        client = Groq(api_key=GROQ_KEY)
-        ans = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": f"Context: {sel_tab}. Q: {user_q}"}])
-        st.sidebar.info(ans.choices[0].message.content)
-
     # --- MAIN CONTENT ---
     st.title(f"Strategic View: {sel_tab}")
 
     # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
     with M:
-        if "GSC" in sel_tab.upper() and kw_col and click_col and pos_col:
-            st.subheader("Keyword Performance: Clicks vs. Avg Position")
+        if metric_name_col and primary_val:
+            is_pos = (primary_val == pos_col)
+            label = "Average Position" if is_pos else "Total Clicks"
+            st.subheader(f"Top 20 Keywords by {label}")
+
+            # Aggregation: Mean for Position, Sum for Clicks
+            agg_func = 'mean' if is_pos else 'sum'
+            top_k = tab_df.groupby(metric_name_col)[primary_val].agg(agg_func).reset_index()
             
-            # Aggregate data by Keyword
-            kw_perf = tab_df.groupby(kw_col).agg({click_col: 'sum', pos_col: 'mean'}).reset_index()
-            # Sort by Top Clicks
-            kw_perf = kw_perf.sort_values(by=click_col, ascending=False).head(20)
-
-            # Create a Dual-Metric Chart (Bar for Clicks, Line for Position)
-            fig_gsc = go.Figure()
-            # Bars for Clicks
-            fig_gsc.add_trace(go.Bar(x=kw_perf[kw_col], y=kw_perf[click_col], name="Clicks", marker_color='#4285F4', yaxis='y1'))
-            # Line for Position
-            fig_gsc.add_trace(go.Scatter(x=kw_perf[kw_col], y=kw_perf[pos_col], name="Avg Position", line=dict(color='#DB4437', width=3), yaxis='y2'))
-
-            fig_gsc.update_layout(
-                template="plotly_white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(title="Total Clicks", side="left"),
-                yaxis2=dict(title="Avg Position", side="right", overlaying="y", autorange="reversed"),
-                margin=dict(l=20, r=20, t=50, b=100)
-            )
-            st.plotly_chart(fig_gsc, use_container_width=True)
-        
-        elif any(x in sel_tab.upper() for x in ["GA4", "PAGE", "DATA"]):
-            # Standard GA4 Leaderboard if not GSC
-            val_col = click_col if click_col else next((c for c in tab_df.columns if 'SESSIONS' in c.upper() or 'VIEWS' in c.upper()), None)
-            name_col = kw_col if kw_col else next((c for c in tab_df.columns if 'PAGE' in c.upper()), None)
-            if name_col and val_col:
-                top_ga4 = tab_df.groupby(name_col)[val_col].sum().reset_index().sort_values(by=val_col, ascending=True).tail(20)
-                fig_ga4 = px.bar(top_ga4, x=val_col, y=name_col, orientation='h', color_discrete_sequence=['#34A853'], template="plotly_white")
-                st.plotly_chart(fig_ga4, use_container_width=True)
+            # Sorting: Position 1 is "best" (ascending), Clicks 1000 is "best" (descending)
+            top_k = top_k.sort_values(by=primary_val, ascending=not is_pos).head(20)
+            
+            # Plotly renders bottom-up, so we reverse for display
+            fig_k = px.bar(top_k.iloc[::-1], x=primary_val, y=metric_name_col, orientation='h', 
+                           template="plotly_white", color_discrete_sequence=['#4285F4'], text=primary_val)
+            
+            if is_pos:
+                fig_k.update_layout(xaxis=dict(autorange="reversed", title="Average Position (Lower is Better)"))
+            
+            fig_k.update_traces(texttemplate='%{text:.1f}' if is_pos else '%{text}', textposition='outside')
+            st.plotly_chart(fig_k, use_container_width=True)
 
     st.divider()
 
@@ -124,26 +107,19 @@ if not tab_df.empty:
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS (BY KEYWORD) ---
-    st.subheader("Monthly Performance Trends (Top Keywords)")
-    if kw_col and click_col and date_col in tab_df.columns:
-        # Get top 20 keywords globally for the charts
-        top_k_list = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).index.tolist()
+    # --- MONTHLY PERFORMANCE TRENDS ---
+    st.subheader("Monthly Performance Trends")
+    if metric_name_col and primary_val and date_col in tab_df.columns:
+        # Get top 10 for the trend views
+        top_items = tab_df.groupby(metric_name_col)[primary_val].agg('mean' if primary_val == pos_col else 'sum').sort_values(ascending=(primary_val == pos_col)).head(10).index.tolist()
         
-        # Display Trends
-        for kw in top_k_list:
-            kw_data = tab_df[tab_df[kw_col] == kw].sort_values('dt')
-            with st.expander(f"Trend for: {kw}"):
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    fig_trend = px.line(kw_data, x='dt', y=click_col, markers=True, title=f"Clicks Trend: {kw}")
-                    if pos_col in kw_data.columns:
-                        fig_trend.add_trace(go.Scatter(x=kw_data['dt'], y=kw_data[pos_col], name="Position", yaxis="y2", line=dict(dash='dot')))
-                        fig_trend.update_layout(yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"))
-                    st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{kw}")
-                with c2:
-                    st.write("Metric Details")
-                    st.dataframe(kw_data[['dt', click_col, pos_col]].dropna(axis=1), hide_index=True)
+        for item in top_items:
+            item_data = tab_df[tab_df[metric_name_col] == item].sort_values('dt')
+            with st.expander(f"Trend for: {item}"):
+                fig_t = px.line(item_data, x='dt', y=primary_val, markers=True)
+                if primary_val == pos_col:
+                    fig_t.update_layout(yaxis=dict(autorange="reversed", title="Position"))
+                st.plotly_chart(fig_t, use_container_width=True, key=f"tr_{item}")
 
 else:
-    st.info("No data found. Please check your Google Sheet connection.")
+    st.info("No data found. Please check your Google Sheet tab names.")
