@@ -56,12 +56,11 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
         else:
             data_context = df.head(50).to_string()
 
-        system_msg = "Senior Strategic Analyst role. Compare countries, identify leaders/laggards, and explain business implications."
+        system_msg = "Senior Strategic Analyst. Compare countries and provide business implications."
         user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else f'Analyze performance for {tab_name}'}"
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Use the most stable model string to avoid 404
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nContext:\n{data_context}")
             return response.text
@@ -85,16 +84,17 @@ def check_password():
                 st.session_state["password_correct"] = True
                 st.rerun()
             else:
-                st.error("Authentication failed")
+                st.error("Access Denied")
         return False
     return True
 
 if not check_password():
     st.stop()
 
-# Session State Initialization
+# Session State
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
 if "ai_report" not in st.session_state: st.session_state.ai_report = ""
+if "last_chat_input" not in st.session_state: st.session_state.last_chat_input = ""
 
 # Load Data
 try:
@@ -102,7 +102,7 @@ try:
 except Exception as e:
     st.error(f"Data error: {e}"); st.stop()
 
-sel_tab = st.sidebar.selectbox("Dashboard Selection", list(df_dict.keys()))
+sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
@@ -116,25 +116,15 @@ if not tab_df.empty:
 
     is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
 
-    # Sidebar Filter
+    # Sidebar Filters
     if loc_col:
         raw_locs = tab_df[loc_col].dropna().unique()
         all_locs = sorted([str(x) for x in raw_locs], key=lambda x: x != 'Germany')
-        sel_locs = st.sidebar.multiselect("Region Filter", all_locs, default=all_locs)
+        sel_locs = st.sidebar.multiselect("Filter Regions", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # Sidebar Chat and Downloads
-    st.sidebar.divider()
-    st.sidebar.subheader("Data Interaction")
-    user_q = st.sidebar.text_input("Ask a question", key="user_input_field")
-    
-    # Process Chat only if input exists to prevent double-firing with Gemini
-    if user_q and not st.session_state.get('last_q') == user_q:
-        ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
-        st.session_state.chat_history.append({"q": user_q, "a": ans})
-        st.session_state['last_q'] = user_q
-
     # Sidebar Downloads
+    st.sidebar.divider()
     st.sidebar.subheader("Export Options")
     if st.session_state.ai_report and PDF_SUPPORT:
         pdf_bytes = generate_pdf(st.session_state.ai_report, sel_tab)
@@ -149,11 +139,22 @@ if not tab_df.empty:
     except ImportError:
         pass
 
+    # Sidebar Chat
+    st.sidebar.divider()
+    st.sidebar.subheader("Data Chat")
+    user_q = st.sidebar.text_input("Ask a question", key="chat_input")
+    
+    # Only run Groq if the question has actually changed
+    if user_q and user_q != st.session_state.last_chat_input:
+        ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
+        st.session_state.chat_history.append({"q": user_q, "a": ans})
+        st.session_state.last_chat_input = user_q
+
     for chat in reversed(st.session_state.chat_history):
         st.sidebar.text(f"User: {chat['q']}")
         st.sidebar.info(chat['a'])
 
-    # Main Dashboard Visuals
+    # Main Visuals
     st.title(f"Strategic View: {sel_tab}")
     
     if "GSC" in sel_tab.upper() and metric_name_col:
@@ -162,34 +163,35 @@ if not tab_df.empty:
         top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index().sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
         fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h')
         if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_k, use_container_width=True)
+        st.plotly_chart(fig_k, use_container_width=True, key="main_bar_chart")
 
-    # Gemini Report Section
+    # Gemini Report
     st.divider()
     st.subheader("Strategic AI Report")
-    if st.button("Run Executive Analysis"):
-        with st.spinner("Processing..."):
+    if st.button("Generate Analysis"):
+        with st.spinner("Analyzing..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
             st.rerun()
     
     if st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
 
-    # Trends
+    # Trends Loop
     st.divider()
     st.subheader("Monthly Performance Trends")
     if metric_name_col and value_col and date_col in tab_df.columns:
         agg_sort = 'min' if is_ranking else 'sum'
         top_20_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
 
-        for loc in (tab_df[loc_col].unique() if loc_col else [None]):
+        for loc_idx, loc in enumerate(tab_df[loc_col].unique() if loc_col else [None]):
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.write(f"Region: {loc if loc else 'Global'}")
             region_keywords = [kw for kw in top_20_list if kw in loc_data[metric_name_col].unique()]
 
-            for kw in region_keywords:
+            for kw_idx, kw in enumerate(region_keywords):
                 kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
                 with st.expander(f"Data for: {kw}"):
-                    fig = px.line(kw_data, x='dt', y=value_col, markers=True)
+                    fig = px.line(kw_data, x='dt', y=value_col, markers=True, title=f"Trend: {kw}")
                     if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Added unique keys to prevent DuplicateElementId error
+                    st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc_idx}_{kw_idx}")
