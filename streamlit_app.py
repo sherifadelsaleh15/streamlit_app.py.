@@ -3,8 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import re
+import io
 from modules.data_loader import load_and_preprocess_data
-# from modules.ai_engine import get_ai_strategic_insight # REMOVED TO FIX PREVIOUS ERROR
 from utils import get_prediction
 from groq import Groq
 import google.generativeai as genai
@@ -25,19 +25,19 @@ GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- PDF HELPER FUNCTION ---
 def generate_pdf(report_text, tab_name):
+    if not PDF_SUPPORT:
+        return None
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
     pdf.set_font("Arial", size=12)
     pdf.ln(10)
-    # Clean text to avoid encoding errors
     clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
     pdf.multi_cell(0, 10, txt=clean_text)
     return pdf.output(dest='S').encode('latin-1')
 
 # --- CORE FUNCTIONS ---
-
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
@@ -52,7 +52,6 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
             group_total = [loc_col]
             if metric_col: group_total.append(metric_col)
             totals_str = df.groupby(group_total)[val_col].sum().reset_index().to_string(index=False)
-
             data_context = f"SYSTEM STRATEGIC DATA:\n[MATRIX]:\n{comparison_matrix.to_string()}\n\n[TOTALS]:\n{totals_str}"
         else:
             data_context = df.head(50).to_string()
@@ -62,7 +61,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            model = genai.GenerativeModel(model_name='models/gemini-3-flash-preview')
+            model = genai.GenerativeModel(model_name='models/gemini-1.5-flash') # Updated to stable model
             response = model.generate_content(f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}")
             return response.text
         else:
@@ -77,35 +76,30 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
 
 def check_password():
     ADMIN_PASSWORD = "strategic_2026" 
-    def password_entered():
-        if st.session_state["password"] == ADMIN_PASSWORD:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"] 
-        else:
-            st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
         st.subheader("🔒 Digital Strategy Login")
-        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
+        pwd = st.text_input("Enter Dashboard Password", type="password")
+        if st.button("Login"):
+            if pwd == ADMIN_PASSWORD:
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("😕 Password incorrect")
         return False
-    elif not st.session_state["password_correct"]:
-        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
-        st.error("😕 Password incorrect")
-        return False
-    else: return True
+    return True
 
 if not check_password():
     st.stop()
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "ai_report" not in st.session_state:
-    st.session_state.ai_report = ""
+# 3. Session State Init
+if "chat_history" not in st.session_state: st.session_state.chat_history = []
+if "ai_report" not in st.session_state: st.session_state.ai_report = ""
 
+# 4. Load Data
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
-    st.error(f"Data Loading Error: {e}")
-    st.stop()
+    st.error(f"Data Loading Error: {e}"); st.stop()
 
 sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
@@ -117,13 +111,7 @@ if not tab_df.empty:
     date_col = 'dt'
 
     if value_col:
-        def clean_currency(x):
-            if isinstance(x, str):
-                clean_str = re.sub(r'[^\d.]', '', x) 
-                return clean_str if clean_str else '0'
-            return x
-        tab_df[value_col] = tab_df[value_col].apply(clean_currency)
-        tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
+        tab_df[value_col] = pd.to_numeric(tab_df[value_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
 
     is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
 
@@ -138,9 +126,8 @@ if not tab_df.empty:
     st.sidebar.subheader("Chat with Data")
     user_q = st.sidebar.text_input("Ask a question:", key="user_input")
     if user_q:
-        with st.sidebar:
-            ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
-            st.session_state.chat_history.append({"q": user_q, "a": ans})
+        ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
+        st.session_state.chat_history.append({"q": user_q, "a": ans})
     
     for chat in reversed(st.session_state.chat_history):
         st.sidebar.info(f"User: {chat['q']}")
@@ -149,34 +136,34 @@ if not tab_df.empty:
     # Main Visuals
     st.title(f"Strategic View: {sel_tab}")
     
+    # PDF and EXCEL DOWNLOAD BUTTONS (Top of page)
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        if st.session_state.ai_report and PDF_SUPPORT:
+            pdf_bytes = generate_pdf(st.session_state.ai_report, sel_tab)
+            st.download_button("📥 Download PDF Report", data=pdf_bytes, file_name=f"Report_{sel_tab}.pdf", mime="application/pdf")
+    with col_dl2:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            tab_df.to_excel(writer, index=False, sheet_name='Data')
+        st.download_button("📊 Export Data to Excel", data=output.getvalue(), file_name=f"Data_{sel_tab}.xlsx", mime="application/vnd.ms-excel")
+
     if "GSC" in sel_tab.upper() and metric_name_col:
         st.subheader("Top 20 Keywords")
         agg_k = 'min' if is_ranking else 'sum'
-        top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index()
-        top_k = top_k.sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
+        top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index().sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
         fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', color_discrete_sequence=['#4285F4'])
         if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
         st.plotly_chart(fig_k, use_container_width=True)
 
     # Gemini Report Section
     st.subheader("Strategic AI Report")
-    c1, c2 = st.columns([1, 4])
-    with c1:
-        gen_btn = st.button("Generate Analysis")
-    
-    if gen_btn:
+    if st.button("Generate Analysis"):
         with st.spinner("Analyzing..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
+            st.rerun() # Force rerun to show PDF button immediately
     
     if st.session_state.ai_report:
-        # PDF DOWNLOAD FEATURE
-        pdf_data = generate_pdf(st.session_state.ai_report, sel_tab)
-        st.download_button(
-            label="📥 Download Report as PDF",
-            data=pdf_data,
-            file_name=f"Strategic_Report_{sel_tab}.pdf",
-            mime="application/pdf"
-        )
         st.markdown(st.session_state.ai_report)
 
     # Trends
