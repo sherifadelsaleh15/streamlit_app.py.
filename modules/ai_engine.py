@@ -23,7 +23,7 @@ class AIEngine:
             st.error(f"Groq initialization failed: {str(e)}")
             self.groq_client = None
         
-        # Setup Gemini
+        # Setup Gemini with your specific key
         try:
             genai.configure(api_key=GEMINI_KEY)
             # Try gemini-pro first (most stable)
@@ -47,49 +47,43 @@ class AIEngine:
         """Prepare data context for AI analysis"""
         try:
             # Identify columns
-            loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
-            val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE'])), None)
-            metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['METRIC', 'TYPE', 'KEYWORD', 'QUERY'])), None)
+            loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+            val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE', 'POSITION', 'IMPRESSIONS'])), None)
+            metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC', 'DEVICE'])), None)
             date_col = 'dt'
             
             # Build context
             if loc_col and val_col and date_col in df.columns:
                 monthly_df = df.copy()
-                monthly_df['Month'] = monthly_df[date_col].dt.strftime('%b %Y')
+                monthly_df['Month'] = pd.to_datetime(monthly_df[date_col]).dt.strftime('%b %Y')
                 
-                # Regional comparison
-                comparison_matrix = monthly_df.groupby([loc_col, 'Month', metric_col if metric_col else loc_col])[val_col].sum().unstack(level=0).fillna(0)
+                context_parts = [f"DASHBOARD: {tab_name}"]
+                
+                # Regional/Metric breakdown
+                if metric_col:
+                    pivot_data = pd.pivot_table(
+                        monthly_df, 
+                        values=val_col, 
+                        index=['Month', metric_col], 
+                        columns=loc_col if loc_col else 'Region',
+                        aggfunc='sum', 
+                        fill_value=0
+                    )
+                    context_parts.append(f"\n[PERFORMANCE BREAKDOWN]:\n{pivot_data.to_string()}")
                 
                 # Totals
-                group_total = [loc_col]
-                if metric_col: 
-                    group_total.append(metric_col)
-                totals_str = df.groupby(group_total)[val_col].sum().reset_index().to_string(index=False)
+                group_cols = [c for c in [loc_col, metric_col] if c]
+                if group_cols:
+                    totals = df.groupby(group_cols)[val_col].sum().reset_index()
+                    context_parts.append(f"\n[TOTAL BY {' / '.join(group_cols)}]:\n{totals.to_string()}")
                 
-                # Monthly breakdown
-                monthly_breakdown = monthly_df.groupby(['Month', loc_col])[val_col].sum().reset_index().to_string(index=False)
-                
-                context = f"""
-TAB: {tab_name}
-
-[REGIONAL COMPARISON MATRIX - Monthly]:
-{comparison_matrix.to_string()}
-
-[MONTHLY TRENDS BY REGION]:
-{monthly_breakdown}
-
-[TOTAL PERFORMANCE]:
-{totals_str}
-
-[RECENT DATA]:
-{df.tail(10).to_string()}
-"""
+                context = '\n'.join(context_parts)
             else:
-                context = f"TAB: {tab_name}\n\n[RAW DATA]:\n{df.head(50).to_string()}"
+                context = f"DASHBOARD: {tab_name}\n\n[RAW DATA SAMPLE]:\n{df.head(20).to_string()}"
             
             return context
         except Exception as e:
-            return f"Error preparing context: {str(e)}"
+            return f"Error preparing context: {str(e)}\nDataFrame columns: {df.columns.tolist()}"
     
     def get_strategic_insight(self, df, tab_name, custom_prompt=None, use_gemini=False):
         """Get AI-powered strategic insights"""
@@ -113,7 +107,7 @@ Be direct, professional, and data-driven. Focus on strategic value, not just des
 
 USER QUERY: {custom_prompt if custom_prompt else f'Analyze the performance in {tab_name} and provide strategic recommendations.'}
 
-Provide a concise but comprehensive strategic analysis.
+Provide a concise but comprehensive strategic analysis (max 300 words).
 """
         
         try:
