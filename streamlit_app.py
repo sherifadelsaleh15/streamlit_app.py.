@@ -81,7 +81,6 @@ if not tab_df.empty:
     with col_title:
         st.title(f"Strategic View: {sel_tab}")
     with col_dl:
-        # Download button for the entire filtered dataset
         csv_main = tab_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Sheet", data=csv_main, file_name=f"{sel_tab}_data.csv", mime='text/csv')
 
@@ -98,7 +97,6 @@ if not tab_df.empty:
             fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
                               color_discrete_sequence=['#4285F4' if is_gsc else '#34A853'])
             if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
-            # Chart includes high-res download config
             st.plotly_chart(fig_main, use_container_width=True, config={'toImageButtonOptions': {'format': 'png', 'scale': 2}})
 
     st.divider()
@@ -159,7 +157,6 @@ if not tab_df.empty:
                                 fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
                         
                         if is_ranking and not (is_gsc and pos_col): fig.update_layout(yaxis=dict(autorange="reversed"))
-                        # Chart includes high-res download config
                         st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{item}", config={'toImageButtonOptions': {'format': 'png', 'scale': 2}})
                     
                     with col2:
@@ -167,29 +164,48 @@ if not tab_df.empty:
                         cols_to_show = ['dt', value_col]
                         if is_gsc and pos_col: cols_to_show.append(pos_col)
                         table_view = item_data[cols_to_show].copy()
-                        
-                        # Download button for individual keyword/page data
                         csv_item = table_view.to_csv(index=False).encode('utf-8')
                         st.download_button("Export Stats", data=csv_item, file_name=f"{item}_stats.csv", key=f"dl_{loc}_{item}")
-                        
                         table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
                         st.dataframe(table_view, hide_index=True)
 
-    # --- GROK STRATEGIC CHAT (BOTTOM) ---
+    # --- SMART GROK STRATEGIC CHAT ---
     st.divider()
-    st.sidebar.subheader("Grok Strategic Chat")
-    user_input = st.sidebar.text_input("Ask about this data...", key="grok_input")
+    st.sidebar.subheader("Grok Strategic Advisor")
+    user_input = st.sidebar.text_input("Deep Research Analysis...", key="grok_input")
+    
     if user_input:
         try:
             client = Groq(api_key=GROQ_KEY)
-            context = tab_df.head(10).to_string()
+            
+            # Smart Context Construction: Stats + Top Performers
+            stats_context = tab_df.describe().to_string()
+            top_performers = tab_df.groupby(item_col)[value_col].sum().nlargest(10).to_string()
+            recent_trends = tab_df.sort_values(date_col, ascending=False).head(10).to_string()
+            
             chat_completion = client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": "You are a Senior Strategic Advisor. Use this data context:\n" + context},
+                    {
+                        "role": "system", 
+                        "content": f"""You are a World-Class Senior Strategic Advisor and Data Scientist. 
+                        Your goal is to provide deep research, identify hidden patterns, and offer actionable 2026 growth strategies based on the data.
+                        
+                        DATASET CONTEXT ({sel_tab}):
+                        1. Statistical Summary: {stats_context}
+                        2. Top 10 Performers: {top_performers}
+                        3. Recent Data Snap: {recent_trends}
+                        
+                        Instructions:
+                        - Be precise and analytical. Use numbers from the data.
+                        - If it's SEO data (GSC), focus on Click-Through Rates and Position volatility.
+                        - If it's GA4 data, focus on user retention and conversion value.
+                        - Provide 'Next Best Action' for the user."""
+                    },
                     {"role": "user", "content": user_input}
                 ],
                 model="llama-3.3-70b-versatile",
+                temperature=0.2 # Lower temperature for more accurate research
             )
             st.sidebar.info(chat_completion.choices[0].message.content)
         except Exception as e:
-            st.sidebar.error(f"Grok Error: {str(e)}")
+            st.sidebar.error(f"Grok Analysis Failed: {str(e)}")
