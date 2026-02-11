@@ -169,43 +169,43 @@ if not tab_df.empty:
                         table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
                         st.dataframe(table_view, hide_index=True)
 
-    # --- SMART GROK STRATEGIC CHAT ---
-    st.divider()
+    # --- SMART GROK STRATEGIC CHAT WITH RESET ---
+    st.sidebar.divider()
     st.sidebar.subheader("Grok Strategic Advisor")
+    
+    # Reset Logic
+    if "grok_chat_history" not in st.session_state:
+        st.session_state.grok_chat_history = None
+
+    if st.sidebar.button("🗑️ Reset Chat"):
+        st.session_state.grok_chat_history = None
+        st.rerun()
+
     user_input = st.sidebar.text_input("Deep Research Analysis...", key="grok_input")
     
     if user_input:
         try:
             client = Groq(api_key=GROQ_KEY)
             
-            # Smart Context Construction: Stats + Top Performers
+            # Context Preparation
             stats_context = tab_df.describe().to_string()
             top_performers = tab_df.groupby(item_col)[value_col].sum().nlargest(10).to_string()
-            recent_trends = tab_df.sort_values(date_col, ascending=False).head(10).to_string()
             
             chat_completion = client.chat.completions.create(
                 messages=[
                     {
                         "role": "system", 
-                        "content": f"""You are a World-Class Senior Strategic Advisor and Data Scientist. 
-                        Your goal is to provide deep research, identify hidden patterns, and offer actionable 2026 growth strategies based on the data.
-                        
-                        DATASET CONTEXT ({sel_tab}):
-                        1. Statistical Summary: {stats_context}
-                        2. Top 10 Performers: {top_performers}
-                        3. Recent Data Snap: {recent_trends}
-                        
-                        Instructions:
-                        - Be precise and analytical. Use numbers from the data.
-                        - If it's SEO data (GSC), focus on Click-Through Rates and Position volatility.
-                        - If it's GA4 data, focus on user retention and conversion value.
-                        - Provide 'Next Best Action' for the user."""
+                        "content": f"Strategic Advisor. Context: {stats_context}\nTop Performers: {top_performers}"
                     },
                     {"role": "user", "content": user_input}
                 ],
                 model="llama-3.3-70b-versatile",
-                temperature=0.2 # Lower temperature for more accurate research
+                temperature=0.2
             )
-            st.sidebar.info(chat_completion.choices[0].message.content)
+            st.session_state.grok_chat_history = chat_completion.choices[0].message.content
         except Exception as e:
-            st.sidebar.error(f"Grok Analysis Failed: {str(e)}")
+            st.sidebar.error(f"Grok Error: {str(e)}")
+
+    # Display Response if exists
+    if st.session_state.grok_chat_history:
+        st.sidebar.info(st.session_state.grok_chat_history)
