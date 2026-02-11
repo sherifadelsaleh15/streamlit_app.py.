@@ -8,47 +8,23 @@ from groq import Groq
 
 # Zero-indentation imports
 from modules.data_loader import load_and_preprocess_data
-from modules.ml_models import generate_forecast
+from modules.ml_models import generate_forecast, get_prediction
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
-
-# Safe PDF Support
-try:
-    from fpdf import FPDF
-    PDF_SUPPORT = True
-except ImportError:
-    PDF_SUPPORT = False
 
 # API KEYS
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- HELPER FUNCTIONS ---
-def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
+def get_ai_insight(df, tab_name):
     try:
         data_summary = df.head(15).to_string()
-        system_msg = "Senior Strategic Analyst. Compare performance across regions and provide implications."
-        user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else 'Analyze regional performance'}"
-
-        if engine == "gemini":
-            genai.configure(api_key=GEMINI_KEY)
-            # Use 1.5-flash and pro as fallbacks to avoid 404s
-            for model_name in ['gemini-1.5-flash', 'gemini-pro']:
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    response = model.generate_content(f"{system_msg}\n{user_msg}\nData:\n{data_summary}")
-                    return response.text
-                except Exception:
-                    continue
-            return "Gemini unreachable."
-        else:
-            client = Groq(api_key=GROQ_KEY)
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}]
-            )
-            return response.choices[0].message.content
+        genai.configure(api_key=GEMINI_KEY)
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(f"Analyze this {tab_name} data and provide strategic implications:\n{data_summary}")
+        return response.text
     except Exception as e:
         return f"AI Error: {str(e)}"
 
@@ -60,8 +36,6 @@ if "password_correct" not in st.session_state:
         if pwd == "strategic_2026":
             st.session_state["password_correct"] = True
             st.rerun()
-        else:
-            st.error("Denied")
     st.stop()
 
 # 3. Data Loading
@@ -71,75 +45,118 @@ except Exception as e:
     st.error(f"Data loading failed: {e}")
     st.stop()
 
-# 4. Sidebar Navigation & Filtering
+# 4. Sidebar Navigation
 sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
-# Restore Original Country/Region Filtering
-loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
-
-if loc_col and not tab_df.empty:
-    all_locs = sorted(tab_df[loc_col].unique().tolist())
-    # Default to Germany if present, else all
-    default_locs = [l for l in all_locs if l == 'Germany'] or all_locs
-    selected_locs = st.sidebar.multiselect(f"Filter by {loc_col}", all_locs, default=default_locs)
-    tab_df = tab_df[tab_df[loc_col].isin(selected_locs)]
-
-# 5. Main Dashboard Layout (Restored Charts)
-st.title(f"Strategic View: {sel_tab}")
-
 if not tab_df.empty:
-    # Identify Metrics and Dimensions
-    val_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'VALUE', 'VALUE_POSITION'])), None)
-    name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'METRIC'])), None)
+    # --- FAILSAFE COLUMN DETECTION ---
+    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
+    date_col = 'dt'
+    
+    is_ranking = value_col and 'POSITION' in value_col.upper()
 
-    # Metric Row (Summary)
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Count", len(tab_df))
-    with col2:
-        if val_col:
-            st.metric(f"Total {val_col.replace('_', ' ')}", f"{tab_df[val_col].sum():,.0f}")
-    with col3:
-        if loc_col:
-            st.metric("Active Regions", len(selected_locs))
+    # --- SIDEBAR FILTERS ---
+    if loc_col:
+        all_locs = sorted(tab_df[loc_col].dropna().unique().tolist())
+        sel_locs = st.sidebar.multiselect(f"Filter Region", all_locs, default=all_locs)
+        tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
+
+    # --- SIDEBAR: CHAT WITH DATA ---
+    st.sidebar.divider()
+    st.sidebar.subheader("Chat with Data")
+    user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
+    if user_q:
+        client = Groq(api_key=GROQ_KEY)
+        ans = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": f"Data context: {sel_tab}. Question: {user_q}"}]
+        )
+        st.sidebar.info(ans.choices[0].message.content)
+
+    # --- MAIN CONTENT ---
+    st.title(f"Strategic View: {sel_tab}")
+
+    # --- DYNAMIC LEADERBOARDS ---
+    col_lead1, col_lead2 = st.columns(2)
+    
+    with col_lead1:
+        # GSC Leaderboard
+        if "GSC" in sel_tab.upper() and metric_name_col and value_col:
+            st.subheader("Top 20 GSC Keywords")
+            agg_k = 'min' if is_ranking else 'sum'
+            top_k = tab_df.groupby(metric_name_col)[value_col].agg(agg_k).reset_index()
+            top_k = top_k.sort_values(by=value_col, ascending=(agg_k=='min')).head(20)
+            fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', template="plotly_white", color_discrete_sequence=['#4285F4'])
+            if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_k, use_container_width=True)
+
+    with col_lead2:
+        # GA4 Leaderboard
+        if ("GA4" in sel_tab.upper() or "PAGE" in sel_tab.upper()) and page_col and value_col:
+            st.subheader("Top 20 GA4 Pages")
+            top_p = tab_df.groupby(page_col)[value_col].sum().reset_index()
+            top_p = top_p.sort_values(by=value_col, ascending=False).head(20)
+            fig_p = px.bar(top_p, x=value_col, y=page_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'])
+            st.plotly_chart(fig_p, use_container_width=True)
 
     st.divider()
 
-    # Regional Breakdown Chart (The Donut Chart)
-    if loc_col and val_col:
-        st.subheader("Performance by Region/Country")
-        reg_df = tab_df.groupby(loc_col)[val_col].sum().reset_index()
-        fig_reg = px.pie(reg_df, values=val_col, names=loc_col, hole=0.4, 
-                         color_discrete_sequence=px.colors.qualitative.Pastel)
-        st.plotly_chart(fig_reg, use_container_width=True)
-
-    # Metric Comparison Chart (Grouped Bar Chart)
-    if val_col and name_col:
-        st.subheader(f"Top 15 {name_col.replace('_', ' ')} by {val_col.replace('_', ' ')}")
-        # Grouping by both metric name and country to see them side-by-side
-        top_df = tab_df.groupby([name_col, loc_col])[val_col].sum().reset_index()
-        fig_bar = px.bar(top_df.nlargest(15, val_col), x=val_col, y=name_col, 
-                         color=loc_col, orientation='h', barmode='group')
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-    # Forecast Section
-    if val_col and 'dt' in tab_df.columns:
-        st.divider()
-        st.subheader("3-Month Strategic Forecast")
-        forecast_df = generate_forecast(tab_df, val_col)
-        if not forecast_df.empty:
-            fig_trend = go.Figure()
-            hist_df = tab_df.groupby('dt')[val_col].sum().reset_index()
-            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical"))
-            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash')))
-            st.plotly_chart(fig_trend, use_container_width=True)
-
-    # AI Insight Section
-    st.divider()
-    if st.button("Generate Regional Analysis"):
+    # --- STRATEGIC AI REPORT ---
+    st.subheader("Strategic AI Report")
+    if "ai_report" not in st.session_state: st.session_state.ai_report = ""
+    
+    if st.button("Generate Executive Analysis"):
         with st.spinner("Analyzing..."):
-            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
-            st.markdown(report)
-else:
-    st.warning("No data available for the selected filters.")
+            st.session_state.ai_report = get_ai_insight(tab_df, sel_tab)
+    
+    if st.session_state.ai_report:
+        st.markdown(st.session_state.ai_report)
+        st.download_button("Download AI Report (TXT)", st.session_state.ai_report, f"Report_{sel_tab}.txt")
+
+    st.divider()
+
+    # --- MONTHLY PERFORMANCE TRENDS ---
+    st.subheader("Monthly Performance Trends")
+    show_forecast = st.checkbox("Show Scikit-Learn Forecasts", value=True)
+
+    if metric_name_col and value_col and date_col in tab_df.columns:
+        agg_sort = 'min' if is_ranking else 'sum'
+        top_20_list = tab_df.groupby(metric_name_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
+        
+        loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
+
+        for loc in loc_list:
+            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+            st.markdown(f"### Region: {loc if loc else 'Global'}")
+            
+            region_metrics = [m for m in top_20_list if m in loc_data[metric_name_col].unique()]
+
+            for kw in region_metrics:
+                kw_data = loc_data[loc_data[metric_name_col] == kw].sort_values('dt')
+                
+                with st.expander(f"Data for: {kw} in {loc}", expanded=(loc == 'Germany')):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        fig = px.line(kw_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {kw} ({loc})")
+                        
+                        if show_forecast and len(kw_data) >= 3:
+                            f_in = kw_data.rename(columns={value_col: 'Value', 'dt': 'ds'})
+                            forecast = get_prediction(f_in)
+                            if forecast is not None:
+                                fig.add_trace(go.Scatter(x=pd.concat([forecast['ds'], forecast['ds'][::-1]]), y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]), fill='toself', fillcolor='rgba(255,165,0,0.1)', line=dict(color='rgba(255,255,255,0)'), showlegend=False))
+                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
+
+                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed", title="Rank"))
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    with col2:
+                        st.write("Monthly Data")
+                        table_data = kw_data[['dt', value_col]].copy()
+                        table_data['dt'] = table_data['dt'].dt.strftime('%b %Y')
+                        st.dataframe(table_data, hide_index=True)
+                        csv = table_data.to_csv(index=False).encode('utf-8')
+                        st.download_button("Download CSV", csv, f"{kw}_{loc}.csv")
