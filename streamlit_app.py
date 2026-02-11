@@ -5,7 +5,6 @@ import plotly.express as px
 import io
 from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_engine
-from modules.ui_components import render_sidebar_filters, render_pdf_download
 from config import APP_TITLE, PASSWORD
 
 # Page config
@@ -37,7 +36,7 @@ if "chat_history" not in st.session_state:
 if "ai_report" not in st.session_state:
     st.session_state.ai_report = ""
 
-# Load data
+# Load data using YOUR working loader
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
@@ -49,26 +48,7 @@ sel_tab = st.sidebar.selectbox("Select Dashboard", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # Render sidebar filters
-    tab_df = render_sidebar_filters(tab_df, sel_tab)
-    
-    # Main content
-    st.title(f"Strategic Dashboard: {sel_tab}")
-    
-    # Quick stats
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if 'clicks' in tab_df.columns.str.lower().values:
-            st.metric("Total Clicks", f"{tab_df['clicks'].sum():,.0f}")
-    with col2:
-        if 'impressions' in tab_df.columns.str.lower().values:
-            st.metric("Total Impressions", f"{tab_df['impressions'].sum():,.0f}")
-    with col3:
-        if 'ctr' in tab_df.columns.str.lower().values:
-            avg_ctr = tab_df['ctr'].mean()
-            st.metric("Avg CTR", f"{avg_ctr:.2%}")
-    
-    # Gemini Status
+    # Show Gemini status in sidebar
     st.sidebar.divider()
     st.sidebar.subheader("🤖 AI Status")
     
@@ -76,25 +56,25 @@ if not tab_df.empty:
         st.sidebar.success("✅ Gemini: Ready")
     else:
         st.sidebar.error("❌ Gemini: Unavailable")
-        with st.sidebar.expander("Fix Gemini"):
-            st.markdown("""
-            1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-            2. Create/enable API key
-            3. Enable Generative Language API
-            4. Update key in `.streamlit/secrets.toml`:
-            ```toml
-            GEMINI_API_KEY = "your-key-here"
-            GROQ_API_KEY = "your-key-here"
-            ```
-            """)
+        if ai_engine.get_gemini_error():
+            st.sidebar.caption(f"Error: {ai_engine.get_gemini_error()[:100]}...")
+    
+    # Main content
+    st.title(f"Strategic Dashboard: {sel_tab}")
+    
+    # Show data info
+    with st.expander("📊 Data Overview"):
+        st.write(f"**Rows:** {len(tab_df)}")
+        st.write(f"**Columns:** {', '.join(tab_df.columns)}")
+        if 'dt' in tab_df.columns:
+            st.write(f"**Date Range:** {tab_df['dt'].min()} to {tab_df['dt'].max()}")
     
     # Strategic AI Report
     st.divider()
     st.subheader("🎯 Strategic AI Analysis")
     
-    col1, col2 = st.columns([1, 4])
+    col1, col2 = st.columns(2)
     with col1:
-        # Groq is always available
         if st.button("📊 Analyze with Groq", use_container_width=True):
             with st.spinner("Groq analyzing..."):
                 st.session_state.ai_report = ai_engine.get_strategic_insight(
@@ -103,7 +83,6 @@ if not tab_df.empty:
                 st.rerun()
     
     with col2:
-        # Gemini only if available
         if ai_engine.is_gemini_available():
             if st.button("🧠 Analyze with Gemini", use_container_width=True):
                 with st.spinner("Gemini analyzing..."):
@@ -117,9 +96,6 @@ if not tab_df.empty:
     if st.session_state.ai_report:
         st.markdown("---")
         st.markdown(st.session_state.ai_report)
-        
-        # PDF download
-        render_pdf_download(st.session_state.ai_report, sel_tab)
     
     # Sidebar Chat
     st.sidebar.divider()
@@ -133,28 +109,7 @@ if not tab_df.empty:
                 st.session_state.chat_history.append({"q": user_q, "a": ans})
                 st.session_state.last_chat = user_q
     
-    for chat in reversed(st.session_state.chat_history[-5:]):  # Last 5 messages
+    for chat in reversed(st.session_state.chat_history[-5:]):
         st.sidebar.markdown(f"**You:** {chat['q']}")
         st.sidebar.info(chat['a'])
         st.sidebar.markdown("---")
-    
-    # Export
-    st.sidebar.divider()
-    st.sidebar.subheader("📥 Export")
-    
-    # Excel export
-    try:
-        import xlsxwriter
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            tab_df.to_excel(writer, index=False, sheet_name='Data')
-        st.sidebar.download_button(
-            "📊 Export to Excel",
-            data=output.getvalue(),
-            file_name=f"{sel_tab}_data.xlsx"
-        )
-    except ImportError:
-        st.sidebar.warning("xlsxwriter not installed")
-
-else:
-    st.warning(f"No data available for {sel_tab}")
