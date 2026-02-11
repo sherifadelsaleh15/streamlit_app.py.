@@ -6,14 +6,14 @@ import io
 import google.generativeai as genai
 from groq import Groq
 
-# Zero-indentation imports
+# Zero-indentation imports - these must start at the very edge of the file
 from modules.data_loader import load_and_preprocess_data
 from modules.ml_models import generate_forecast
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 
-# Safe PDF Support
+# Safe PDF Library Import
 try:
     from fpdf import FPDF
     PDF_SUPPORT = True
@@ -36,6 +36,7 @@ def generate_pdf(report_text, tab_name):
         pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
         pdf.set_font("Arial", size=12)
         pdf.ln(10)
+        # Ensure text is compatible with latin-1
         clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
         pdf.multi_cell(0, 10, txt=clean_text)
         return pdf.output(dest='S').encode('latin-1')
@@ -45,12 +46,12 @@ def generate_pdf(report_text, tab_name):
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     try:
         data_summary = df.head(15).to_string()
-        system_msg = "Senior Strategic Analyst. Provide business implications."
+        system_msg = "Senior Strategic Analyst. Provide business implications and regional comparisons."
         user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else 'Analyze data'}"
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Standardized fallback to bypass the 404 error
+            # Fallback loop to bypass 404 errors by trying different model strings
             for model_name in ['gemini-1.5-flash', 'gemini-pro']:
                 try:
                     model = genai.GenerativeModel(model_name)
@@ -58,12 +59,15 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
                     return response.text
                 except Exception:
                     continue
-            return "Gemini models unreachable."
+            return "Gemini models currently unreachable."
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}]
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}
+                ]
             )
             return response.choices[0].message.content
     except Exception as e:
@@ -72,9 +76,9 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
 # 2. Authentication
 def check_password():
     if "password_correct" not in st.session_state:
-        st.subheader("Dashboard Login")
-        pwd = st.text_input("Password", type="password")
-        if st.button("Log In"):
+        st.subheader("Strategy Login")
+        pwd = st.text_input("Enter Key", type="password")
+        if st.button("Submit"):
             if pwd == "strategic_2026":
                 st.session_state["password_correct"] = True
                 st.rerun()
@@ -95,55 +99,62 @@ if "last_q" not in st.session_state: st.session_state.last_q = ""
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
-    st.error(f"Data error: {e}")
+    st.error(f"Data loading failed: {e}")
     st.stop()
 
-# 5. Sidebar
-sel_tab = st.sidebar.selectbox("Select View", list(df_dict.keys()))
+# 5. Sidebar Navigation and Chat
+sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
+    # Sidebar Filters
+    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
+    if loc_col:
+        u_locs = sorted(tab_df[loc_col].unique().tolist(), key=lambda x: x != 'Germany')
+        sel_locs = st.sidebar.multiselect("Filter Regions", u_locs, default=u_locs)
+        tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
+
     # Sidebar Exports
     st.sidebar.divider()
     st.sidebar.subheader("Exports")
     if st.session_state.ai_report and PDF_SUPPORT:
         pdf_data = generate_pdf(st.session_state.ai_report, sel_tab)
         if pdf_data:
-            st.sidebar.download_button("Download PDF", data=pdf_data, file_name="Report.pdf")
+            st.sidebar.download_button("Download Report (PDF)", data=pdf_data, file_name=f"Analysis_{sel_tab}.pdf")
     
     try:
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             tab_df.to_excel(writer, index=False)
-        st.sidebar.download_button("Export Excel", data=buf.getvalue(), file_name="Data.xlsx")
-    except Exception:
+        st.sidebar.download_button("Download Data (Excel)", data=buf.getvalue(), file_name=f"Data_{sel_tab}.xlsx")
+    except:
         pass
 
-    # Sidebar Chat
+    # Sidebar Chat (Groq)
     st.sidebar.divider()
     st.sidebar.subheader("Strategic Chat")
-    q = st.sidebar.text_input("Ask a question", key="chat_input")
+    q = st.sidebar.text_input("Ask about this view", key="chat_input")
     if q and q != st.session_state.last_q:
         ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=q)
         st.session_state.chat_history.append({"q": q, "a": ans})
         st.session_state.last_q = q
 
     for c in reversed(st.session_state.chat_history):
-        st.sidebar.text(f"Q: {c['q']}")
+        st.sidebar.text(f"User: {c['q']}")
         st.sidebar.info(c['a'])
 
-    # 6. Main Dashboard
+    # 6. Main Dashboard Area
     st.title(f"Strategic View: {sel_tab}")
     
-    # Identify Metric Columns
+    # Identify Data Columns
     val_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'VALUE', 'VALUE_POSITION'])), None)
     name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'METRIC'])), None)
     
     if val_col and name_col:
-        st.subheader("Performance Breakdown")
+        st.subheader("Performance Overview")
         top_data = tab_df.groupby(name_col)[val_col].sum().nlargest(15).reset_index()
-        fig = px.bar(top_data, x=val_col, y=name_col, orientation='h')
-        st.plotly_chart(fig, use_container_width=True)
+        fig = px.bar(top_data, x=val_col, y=name_col, orientation='h', color_discrete_sequence=['#004B95'])
+        st.plotly_chart(fig, use_container_width=True, key="main_bar")
 
     # Forecasting (from modules/ml_models.py)
     if val_col and 'dt' in tab_df.columns:
@@ -153,15 +164,15 @@ if not tab_df.empty:
         if not forecast_df.empty:
             fig_trend = go.Figure()
             hist_df = tab_df.groupby('dt')[val_col].sum().reset_index()
-            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical"))
-            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash')))
-            st.plotly_chart(fig_trend, use_container_width=True)
+            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical", line=dict(color='gray')))
+            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash', color='blue')))
+            st.plotly_chart(fig_trend, use_container_width=True, key="trend_chart")
 
-    # Strategic AI Report (Gemini)
+    # Strategic AI Analysis (Gemini)
     st.divider()
     st.subheader("Executive Analysis")
-    if st.button("Generate Strategic Analysis"):
-        with st.spinner("Analyzing..."):
+    if st.button("Generate Strategic AI Report"):
+        with st.spinner("Analyzing performance data..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
             st.rerun()
     
