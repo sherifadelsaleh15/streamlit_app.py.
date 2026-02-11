@@ -8,7 +8,7 @@ import time
 
 # Zero-indentation imports
 from modules.data_loader import load_and_preprocess_data
-from modules.ml_models import get_prediction
+from modules.ml_models import generate_forecast, get_prediction
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
@@ -19,24 +19,23 @@ GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- HELPER FUNCTIONS ---
 def get_ai_insight(df, tab_name):
-    # GEMINI TOKEN FIX: 
-    # 1. Reduce data footprint (TPM) by only sending necessary columns and top rows
-    # 2. Add a timestamp check to prevent exceeding 5 RPM
+    """Gemini Token & Rate Limit Fix."""
     try:
+        # 1. RPM Limit Check (ensuring ~5 requests per minute)
         if "last_gemini_call" in st.session_state:
             elapsed = time.time() - st.session_state.last_gemini_call
-            if elapsed < 12:  # Ensure at least 12 seconds between calls for 5 RPM limit
-                return "⚠️ Please wait a few seconds before generating another report (Rate Limit Safety)."
+            if elapsed < 12: 
+                return "⚠️ Rate limit safety: Please wait a few seconds before generating another report."
 
-        # Compress data summary to minimize tokens
-        cols_to_send = [c for c in df.columns if c in ['dt', 'Location', 'Value', 'Users', 'Metric']]
+        # 2. TPM Limit Check: Compress data to minimize input tokens
+        cols_to_send = [c for c in df.columns if c in ['dt', 'Location', 'Value', 'Users', 'Metric', 'Country']]
         data_summary = df[cols_to_send].head(15).to_string(index=False)
         
         genai.configure(api_key=GEMINI_KEY)
         model = genai.GenerativeModel('gemini-2.0-flash')
         
         response = model.generate_content(
-            f"Senior Strategic Analyst. Data: {tab_name}. Summary:\n{data_summary}\n"
+            f"Senior Strategic Analyst. Analyze: {tab_name} data:\n{data_summary}\n"
             "Provide 3 hyper-concise executive bullet points."
         )
         
@@ -69,9 +68,11 @@ if not tab_df.empty:
     # --- FAILSAFE COLUMN DETECTION ---
     is_gsc = "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper()
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), 'Location')
-    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'USERS', 'VALUE', 'VIEWS', 'CLICKS'])), 'Value')
+    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'VIEWS'])), 'Value')
     metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), 'Metric')
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
+    is_ranking = value_col and 'POSITION' in value_col.upper()
 
     # --- SIDEBAR FILTERS ---
     if loc_col in tab_df.columns:
@@ -81,14 +82,21 @@ if not tab_df.empty:
 
     # --- MAIN CONTENT ---
     st.title(f"Strategic View: {sel_tab}")
-    
-    # Leaderboard
-    display_col = metric_name_col
-    if display_col in tab_df.columns and value_col in tab_df.columns:
-        st.subheader(f"Top Performance: {display_col}")
-        top_df = tab_df.groupby(display_col)[value_col].sum().reset_index().sort_values(by=value_col, ascending=False).head(15)
-        fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white")
-        st.plotly_chart(fig_main, use_container_width=True, key="main_leaderboard")
+
+    # --- CENTERED LEADERBOARDS ---
+    L, M, R = st.columns([1, 4, 1])
+    with M:
+        display_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
+        if display_col in tab_df.columns and value_col in tab_df.columns:
+            st.subheader(f"Top 20 {display_col} by {value_col}")
+            agg_method = 'min' if is_ranking else 'sum'
+            top_df = tab_df.groupby(display_col)[value_col].agg(agg_method).reset_index()
+            top_df = top_df.sort_values(by=value_col, ascending=(agg_method=='min')).head(20)
+            
+            fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
+                              color_discrete_sequence=['#4285F4' if is_gsc else '#34A853'])
+            if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
+            st.plotly_chart(fig_main, use_container_width=True, key="main_leaderboard_unique")
 
     st.divider()
 
@@ -104,20 +112,42 @@ if not tab_df.empty:
 
     # --- MONTHLY PERFORMANCE TRENDS ---
     st.subheader("Monthly Performance Trends")
-    if date_col in tab_df.columns:
+    show_forecast = st.checkbox("Show AI Projections", value=True)
+    item_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
+
+    if item_col in tab_df.columns and date_col in tab_df.columns:
         loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col in tab_df.columns else [None]
+
         for loc in loc_list:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            st.markdown(f"#### Region: {loc if loc else 'Global'}")
-            top_items = loc_data.groupby(display_col)[value_col].sum().sort_values(ascending=False).head(5).index.tolist()
-            
-            for i, item in enumerate(top_items):
-                item_data = loc_data[loc_data[display_col] == item].sort_values('dt')
-                with st.expander(f"Trend: {item}"):
-                    fig = px.line(item_data, x='dt', y=value_col, markers=True)
-                    st.plotly_chart(fig, use_container_width=True, key=f"chart_{loc}_{i}_{item}")
+            st.markdown(f"## Region: {loc if loc else 'Global'}")
+            top_region_items = loc_data.groupby(item_col)[value_col].sum().sort_values(ascending=False).head(10).index.tolist()
 
-    # --- CHAT WITH DATA (SMART & CONCISE) ---
+            for i, item in enumerate(top_region_items):
+                item_data = loc_data[loc_data[item_col] == item].sort_values('dt')
+                
+                with st.expander(f"Data for: {item} | Total: {item_data[value_col].sum()}", expanded=(loc == 'Germany')):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {item}")
+                        
+                        if show_forecast and len(item_data) >= 3:
+                            f_in = item_data.rename(columns={value_col: 'Value', 'dt': 'ds'})
+                            forecast = get_prediction(f_in)
+                            if forecast is not None:
+                                fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
+                        
+                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
+                        # UNIQUE KEY FIX
+                        st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{i}_{item}")
+                    
+                    with col2:
+                        st.write("Monthly Stats")
+                        table_view = item_data[['dt', value_col]].copy()
+                        table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
+                        st.dataframe(table_view, hide_index=True)
+
+    # --- CHAT WITH DATA (GROK) ---
     st.sidebar.divider()
     st.sidebar.subheader("💬 Chat with Data")
 
@@ -144,7 +174,7 @@ if not tab_df.empty:
 
             response = client.chat.completions.create(
                 messages=[
-                    {"role": "system", "content": f"You are a concise Data Assistant. Use this summary: {context_str}. Be brief, give exact numbers."},
+                    {"role": "system", "content": f"You are a concise Data Assistant. Use this summary table:\n{context_str}\n\nRULES: 1. Be brief. 2. Give exact numbers. 3. Use history for follow-ups."},
                     *st.session_state.chat_history
                 ],
                 model="llama-3.3-70b-versatile",
