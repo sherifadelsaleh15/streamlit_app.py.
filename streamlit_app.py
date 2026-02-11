@@ -54,12 +54,21 @@ tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
     # --- FAILSAFE COLUMN DETECTION ---
+    is_gsc = "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper()
+    
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
-    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
+    
+    # GSC Specific Columns
+    click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), None)
+    pos_col = next((c for c in tab_df.columns if 'POSITION' in c.upper() or 'RANK' in c.upper()), None)
+    
+    # Generic Values
+    value_col = click_col if (is_gsc and click_col) else next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'USERS', 'VALUE', 'VIEWS', 'CLICKS'])), None)
     metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
     page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
-    is_ranking = value_col and 'POSITION' in value_col.upper()
+    
+    is_ranking = value_col and ('POSITION' in value_col.upper() or 'RANK' in value_col.upper())
 
     # --- SIDEBAR FILTERS ---
     if loc_col:
@@ -73,7 +82,6 @@ if not tab_df.empty:
     # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
     with M:
-        # Combined GSC/GA4 Logic for Main Chart
         display_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
         if display_col and value_col:
             st.subheader(f"Top 20 {display_col} by {value_col}")
@@ -82,13 +90,13 @@ if not tab_df.empty:
             top_df = top_df.sort_values(by=value_col, ascending=(agg_method=='min')).head(20)
             
             fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
-                              color_discrete_sequence=['#4285F4' if "GSC" in sel_tab.upper() else '#34A853'])
+                              color_discrete_sequence=['#4285F4' if is_gsc else '#34A853'])
             if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
             st.plotly_chart(fig_main, use_container_width=True)
 
     st.divider()
 
-    # --- STRATEGIC AI REPORT ---
+    # --- STRATEGIC AI REPORT (GEMINI) ---
     st.subheader("Strategic AI Report")
     if st.button("Generate Executive Analysis"):
         with st.spinner("Analyzing..."):
@@ -98,37 +106,48 @@ if not tab_df.empty:
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS (REGION > PAGE/KEYWORD) ---
+    # --- MONTHLY PERFORMANCE TRENDS ---
     st.subheader("Monthly Performance Trends")
     show_forecast = st.checkbox("Show AI Projections", value=True)
     
-    # Define what the individual items are (Pages for GA4, Keywords for GSC)
     item_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
 
     if item_col and value_col and date_col in tab_df.columns:
-        # Get unique regions
         loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
 
         for loc in loc_list:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.markdown(f"## Region: {loc if loc else 'Global'}")
             
-            # Identify Top 10 items FOR THIS REGION ONLY
-            top_region_items = (
-                loc_data.groupby(item_col)[value_col]
-                .sum()
-                .sort_values(ascending=False)
-                .head(10)
-                .index.tolist()
-            )
+            # Identify Top 10 items
+            top_region_items = loc_data.groupby(item_col)[value_col].sum().sort_values(ascending=False).head(10).index.tolist()
 
             for item in top_region_items:
                 item_data = loc_data[loc_data[item_col] == item].sort_values('dt')
                 
-                with st.expander(f"Data for: {item} | Views: {item_data[value_col].sum()}", expanded=(loc == 'Germany')):
+                # Dynamic Expander Label
+                if is_gsc and pos_col:
+                    label = f"Keyword: {item} | Clicks: {item_data[click_col].sum()} | Avg Pos: {round(item_data[pos_col].mean(), 1)}"
+                else:
+                    label = f"Data for: {item} | Total {value_col}: {item_data[value_col].sum()}"
+
+                with st.expander(label, expanded=(loc == 'Germany')):
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {item}")
+                        if is_gsc and pos_col and click_col:
+                            # --- GSC DUAL AXIS CHART ---
+                            fig = go.Figure()
+                            fig.add_trace(go.Scatter(x=item_data['dt'], y=item_data[click_col], name="Clicks", line=dict(color='#4285F4', width=3)))
+                            fig.add_trace(go.Scatter(x=item_data['dt'], y=item_data[pos_col], name="Avg Position", yaxis="y2", line=dict(color='#DB4437', dash='dot')))
+                            fig.update_layout(
+                                template="plotly_white",
+                                yaxis=dict(title="Clicks"),
+                                yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"),
+                                legend=dict(orientation="h", y=1.1)
+                            )
+                        else:
+                            # --- STANDARD LINE CHART ---
+                            fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350, title=f"Trend: {item}")
                         
                         if show_forecast and len(item_data) >= 3:
                             f_in = item_data.rename(columns={value_col: 'Value', 'dt': 'ds'})
@@ -136,11 +155,32 @@ if not tab_df.empty:
                             if forecast is not None:
                                 fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
                         
-                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
+                        if is_ranking and not (is_gsc and pos_col): fig.update_layout(yaxis=dict(autorange="reversed"))
                         st.plotly_chart(fig, use_container_width=True, key=f"trend_{loc}_{item}")
                     
                     with col2:
                         st.write("Monthly Stats")
-                        table_view = item_data[['dt', value_col]].copy()
+                        cols_to_show = ['dt', value_col]
+                        if is_gsc and pos_col: cols_to_show.append(pos_col)
+                        table_view = item_data[cols_to_show].copy()
                         table_view['dt'] = table_view['dt'].dt.strftime('%b %Y')
                         st.dataframe(table_view, hide_index=True)
+
+    # --- GROK STRATEGIC CHAT (BOTTOM) ---
+    st.divider()
+    st.sidebar.subheader("Grok Strategic Chat")
+    user_input = st.sidebar.text_input("Ask about this data...", key="grok_input")
+    if user_input:
+        try:
+            client = Groq(api_key=GROQ_KEY)
+            context = tab_df.head(10).to_string()
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "You are a Senior Strategic Advisor. Use this data context:\n" + context},
+                    {"role": "user", "content": user_input}
+                ],
+                model="llama-3.3-70b-versatile",
+            )
+            st.sidebar.info(chat_completion.choices[0].message.content)
+        except Exception as e:
+            st.sidebar.error(f"Grok Error: {str(e)}")
