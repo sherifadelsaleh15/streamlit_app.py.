@@ -78,7 +78,7 @@ if not tab_df.empty:
         csv_main = tab_df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Download Sheet", data=csv_main, file_name=f"{sel_tab}_data.csv", mime='text/csv')
 
-    # Leaderboard Logic (Same as original)
+    # Leaderboard
     L, M, R = st.columns([1, 4, 1])
     with M:
         display_col = page_col if (page_col and "PAGE" in sel_tab.upper()) else metric_name_col
@@ -90,7 +90,8 @@ if not tab_df.empty:
             fig_main = px.bar(top_df, x=value_col, y=display_col, orientation='h', template="plotly_white", 
                               color_discrete_sequence=['#4285F4' if is_gsc else '#34A853'])
             if is_ranking: fig_main.update_layout(xaxis=dict(autorange="reversed"))
-            st.plotly_chart(fig_main, use_container_width=True)
+            # Added unique key for the main leaderboard
+            st.plotly_chart(fig_main, use_container_width=True, key=f"main_leaderboard_{sel_tab}")
 
     st.divider()
 
@@ -105,31 +106,28 @@ if not tab_df.empty:
             loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
             st.markdown(f"## Region: {loc if loc else 'Global'}")
             top_region_items = loc_data.groupby(item_col)[value_col].sum().sort_values(ascending=False).head(10).index.tolist()
-            for item in top_region_items:
+            for i, item in enumerate(top_region_items):
                 item_data = loc_data[loc_data[item_col] == item].sort_values('dt')
                 with st.expander(f"{item} Trend Details"):
                     fig = px.line(item_data, x='dt', y=value_col, markers=True)
-                    st.plotly_chart(fig, use_container_width=True)
+                    # FIX: Added unique key using location and item index
+                    st.plotly_chart(fig, use_container_width=True, key=f"chart_{loc}_{i}")
 
-    # --- CHAT WITH DATA (NEW & SMART GROK) ---
+    # --- CHAT WITH DATA (SMART GROK) ---
     st.sidebar.divider()
     st.sidebar.subheader("💬 Chat with Data")
 
-    # Initialize Chat History
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Reset Button
     if st.sidebar.button("🗑️ Clear History"):
         st.session_state.messages = []
         st.rerun()
 
-    # Display History
     for msg in st.session_state.messages:
         with st.sidebar.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Chat Input
     if user_query := st.sidebar.chat_input("Ask about this data..."):
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.sidebar.chat_message("user"):
@@ -138,29 +136,26 @@ if not tab_df.empty:
         try:
             client = Groq(api_key=GROQ_KEY)
             
-            # Smart Data Summary for Context
+            # Smart context focused on aggregated trends
             monthly_perf = tab_df.groupby([pd.Grouper(key=date_col, freq='M'), loc_col])[value_col].sum().reset_index()
-            monthly_perf[date_col] = monthly_perf[date_col].dt.strftime('%b %Y')
+            monthly_perf[date_col] = monthly_perf[date_col].dt.strftime('%Y-%m')
             data_context = monthly_perf.to_string(index=False)
 
-            # System Instructions: Smart, Concise, Conversational
             sys_prompt = f"""You are a Strategic Data Scientist. 
             CONTEXT: {data_context}
             
             RULES:
-            1. Be EXTREMELY concise. No "Based on the data..." or "I hope this helps".
-            2. If the user asks about a specific month/region, provide only the number and a 1-sentence insight.
-            3. Use the chat history for follow-up context.
-            4. If data is missing for a specific request, say "No data for [Month/Region]".
+            1. Be EXTREMELY concise. Provide data points immediately.
+            2. For region/month queries, prioritize specific numbers from the context.
+            3. Use history for follow-ups.
             """
 
-            full_messages = [{"role": "system", "content": sys_prompt}] + \
-                            st.session_state.messages[-5:] # Last 5 messages for follow-up
+            full_messages = [{"role": "system", "content": sys_prompt}] + st.session_state.messages[-5:]
 
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=full_messages,
-                temperature=0.1 # High precision
+                temperature=0.1
             )
             
             answer = response.choices[0].message.content
