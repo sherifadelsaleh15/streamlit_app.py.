@@ -23,7 +23,7 @@ def get_ai_insight(df, tab_name):
         data_summary = df.head(15).to_string()
         genai.configure(api_key=GEMINI_KEY)
         
-        # FIXED 2026 MODEL ENDPOINTS
+        # 2026 Stable Model List - Prevents 404 Error
         model_options = ['gemini-2.0-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash']
         
         for m_name in model_options:
@@ -61,7 +61,7 @@ sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # --- FAILSAFE & IMPROVED COLUMN DETECTION (Fixed for GA4_Data) ---
+    # --- FAILSAFE COLUMN DETECTION ---
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
     value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
     metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
@@ -91,10 +91,11 @@ if not tab_df.empty:
     # --- MAIN CONTENT ---
     st.title(f"Strategic View: {sel_tab}")
 
-    # --- DYNAMIC LEADERBOARDS (Same Layout) ---
-    col_lead1, col_lead2 = st.columns(2)
+    # --- DYNAMIC LEADERBOARDS (CENTERED VIA COLUMNS) ---
+    # We use a 3-column layout to center the content
+    L, M, R = st.columns([1, 4, 1])
     
-    with col_lead1:
+    with M:
         # GSC Leaderboard logic
         if "GSC" in sel_tab.upper() and metric_name_col and value_col:
             st.subheader("Top 20 GSC Keywords")
@@ -105,8 +106,7 @@ if not tab_df.empty:
             if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
             st.plotly_chart(fig_k, use_container_width=True)
 
-    with col_lead2:
-        # GA4 Leaderboard logic (Modified to find GA4_Data correctly)
+        # GA4 Leaderboard logic (GA4_Data, GA4_Top_Pages)
         if any(x in sel_tab.upper() for x in ["GA4", "PAGE", "DATA"]) and (page_col or metric_name_col) and value_col:
             st.subheader("Top Performance View")
             p_col = page_col if page_col else metric_name_col
@@ -131,11 +131,10 @@ if not tab_df.empty:
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS (Same Expanders) ---
+    # --- MONTHLY PERFORMANCE TRENDS ---
     st.subheader("Monthly Performance Trends")
     show_forecast = st.checkbox("Show AI Projections", value=True)
 
-    # Logic to handle both Metric and Page based trends
     trend_col = metric_name_col if metric_name_col else page_col
 
     if trend_col and value_col and date_col in tab_df.columns:
