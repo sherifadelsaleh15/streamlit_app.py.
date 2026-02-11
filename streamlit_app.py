@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from modules.data_loader import load_and_preprocess_data
-from modules.ai_engine import get_ai_strategic_insight
 from utils import get_prediction
 from groq import Groq
 import google.generativeai as genai
