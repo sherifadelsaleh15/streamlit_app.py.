@@ -23,47 +23,6 @@ st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
-# Configure Gemini once at startup
-genai.configure(api_key=GEMINI_KEY)
-
-# Get available models
-@st.cache_resource
-def get_gemini_model():
-    """Get the best available Gemini model"""
-    try:
-        # List available models
-        models = genai.list_models()
-        
-        # Priority order of models to try
-        model_preferences = [
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro',
-            'gemini-pro-vision'
-        ]
-        
-        # Find first available model from preferences
-        available_models = [m.name for m in models]
-        
-        for preferred in model_preferences:
-            # Check if model exists in any format
-            for avail in available_models:
-                if preferred in avail:
-                    # Extract the clean model name
-                    model_name = avail.split('/')[-1]
-                    try:
-                        test_model = genai.GenerativeModel(model_name)
-                        # Test with a simple prompt
-                        test_model.generate_content("test", generation_config={'max_output_tokens': 10})
-                        return model_name
-                    except:
-                        continue
-        
-        return None
-    except Exception as e:
-        st.error(f"Gemini initialization error: {str(e)}")
-        return None
-
 # PDF HELPER
 def generate_pdf(report_text, tab_name):
     if not PDF_SUPPORT:
@@ -77,6 +36,28 @@ def generate_pdf(report_text, tab_name):
     clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
     pdf.multi_cell(0, 10, txt=clean_text)
     return pdf.output(dest='S').encode('latin-1')
+
+# SIMPLIFIED GEMINI SETUP - Using only gemini-pro which is most widely available
+def setup_gemini():
+    """Simple Gemini setup with error handling"""
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        # Try the most basic model first
+        model = genai.GenerativeModel('gemini-pro')
+        # Test the model with a simple prompt
+        response = model.generate_content("test", generation_config={'max_output_tokens': 5})
+        return model, None
+    except Exception as e:
+        error_msg = str(e)
+        if "API key" in error_msg:
+            return None, "Invalid API key. Please check your Gemini API key."
+        elif "not found" in error_msg or "not supported" in error_msg:
+            return None, "Gemini model not available. Your API key may need to be enabled at https://makersuite.google.com/app/apikey"
+        else:
+            return None, f"Gemini setup failed: {error_msg}"
+
+# Initialize Gemini at startup
+gemini_model, gemini_error = setup_gemini()
 
 # CORE AI ENGINE
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
@@ -131,27 +112,19 @@ SYSTEM STRATEGIC DATA:
         user_msg = f"Dashboard Tab: {tab_name}\n\nUser Question: {custom_prompt if custom_prompt else f'Compare the regional performance in {tab_name} and provide strategic recommendations.'}"
 
         if engine == "gemini":
-            # Get the best available model
-            gemini_model_name = get_gemini_model()
+            global gemini_model, gemini_error
             
-            if not gemini_model_name:
-                return "AI Logic Error: No Gemini models available. Please check your API key and permissions."
+            if gemini_model is None:
+                return f"AI Logic Error: Gemini unavailable - {gemini_error if gemini_error else 'Unknown error'}"
             
             try:
-                # Initialize model with the correct name
-                model = genai.GenerativeModel(gemini_model_name)
-                
-                # Generate response with appropriate parameters
-                response = model.generate_content(
-                    f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}",
-                    generation_config={
-                        'temperature': 0.2,
-                        'max_output_tokens': 2048,
-                    }
+                # Simple generation without complex parameters
+                response = gemini_model.generate_content(
+                    f"{system_msg}\n\n{user_msg}\n\nData Context:\n{data_context}"
                 )
                 return response.text
             except Exception as e:
-                return f"AI Logic Error: Gemini API failed with model {gemini_model_name}. Error: {str(e)}"
+                return f"AI Logic Error: Gemini generation failed: {str(e)}"
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
@@ -260,16 +233,25 @@ if not tab_df.empty:
     st.divider()
     st.subheader("Strategic AI Report")
     
-    # Check if Gemini is available before showing button
-    gemini_available = get_gemini_model() is not None
-    
-    if st.button("Generate Analysis", disabled=not gemini_available):
-        with st.spinner("Analyzing with Gemini..."):
-            st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
-            st.rerun()
-    
-    if not gemini_available:
-        st.warning("⚠️ Gemini AI is currently unavailable. Please check your API key and try again later. Using Groq for analysis is still available in the sidebar chat.")
+    # Show Gemini status
+    if gemini_model is None:
+        st.error(f"⚠️ **Gemini AI Unavailable**")
+        st.info(f"**Reason**: {gemini_error}")
+        st.markdown("""
+        **To fix this:**
+        1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+        2. Sign in with your Google account
+        3. Create a new API key or enable your existing one
+        4. Make sure the Generative Language API is enabled in your Google Cloud Console
+        5. Update the GEMINI_KEY in the code
+        
+        **Alternative**: Use the sidebar chat with Groq (already working) for analysis.
+        """)
+    else:
+        if st.button("Generate Strategic Analysis with Gemini"):
+            with st.spinner("Analyzing with Gemini..."):
+                st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
+                st.rerun()
     
     if st.session_state.ai_report:
         st.markdown(st.session_state.ai_report)
