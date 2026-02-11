@@ -3,29 +3,24 @@ import plotly.express as px
 import google.generativeai as genai
 
 def render_performance_tab(tab_df, sel_tab, api_key):
-    # Detect Page and Views columns
-    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PLATFORM', 'SOURCE'])), None)
-    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['VIEWS', 'SESSIONS', 'USERS', 'CLICKS'])), None)
-    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY'])), None)
+    # Detect Layout Columns
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PLATFORM'])), None)
+    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'VIEWS', 'USERS'])), None)
+
+    if not page_col or not value_col:
+        st.warning(f"Could not detect data columns for {sel_tab}. Found: {list(tab_df.columns)}")
+        return
 
     st.title(f"Performance Analysis: {sel_tab}")
 
-    # Standard Leaderboard
-    L, M, R = st.columns([1, 4, 1])
-    with M:
-        top_df = tab_df.groupby(page_col)[value_col].sum().nlargest(20).reset_index()
-        fig = px.bar(top_df, x=value_col, y=page_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'])
-        st.plotly_chart(fig, use_container_width=True)
+    # Leaderboard
+    top_df = tab_df.groupby(page_col)[value_col].sum().nlargest(20).reset_index()
+    fig = px.bar(top_df, x=value_col, y=page_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'])
+    st.plotly_chart(fig, use_container_width=True)
 
-    # Trends Loop
-    loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany')
-    for loc in loc_list:
-        st.markdown(f"## Region: {loc}")
-        loc_data = tab_df[tab_df[loc_col] == loc]
-        top_pages = loc_data.groupby(page_col)[value_col].sum().nlargest(10).index.tolist()
-        
-        for pg in top_pages:
-            pg_data = loc_data[loc_data[page_col] == pg]
-            with st.expander(f"Entity: {pg} | Total: {pg_data[value_col].sum()}", expanded=(loc=='Germany')):
-                fig = px.line(pg_data, x='dt', y=value_col, markers=True, title=f"Trend: {pg}")
-                st.plotly_chart(fig, use_container_width=True)
+    # Gemini Report Button
+    if st.button("Generate AI Insights"):
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(f"Analyze this {sel_tab} data: {tab_df.head(10).to_string()}")
+        st.markdown(response.text)
