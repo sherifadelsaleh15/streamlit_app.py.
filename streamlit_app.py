@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import re
 from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
 from utils import get_prediction
@@ -32,10 +33,18 @@ if not tab_df.empty:
     page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
 
+    # --- NUCLEAR CLEANING OPTION ---
     if value_col:
-        # --- FIX: NUMERIC CLEANING ---
-        # Removes commas/spaces so "Active Users" isn't 0
-        tab_df[value_col] = tab_df[value_col].astype(str).str.replace(',', '').str.replace(' ', '').str.replace('%', '')
+        def clean_currency(x):
+            if isinstance(x, str):
+                # Remove everything that isn't a digit or a dot
+                # This handles "1,200", "$ 500", "1 000", "12%"
+                clean_str = re.sub(r'[^\d.]', '', x) 
+                return clean_str if clean_str else '0'
+            return x
+
+        # Apply the cleaner
+        tab_df[value_col] = tab_df[value_col].apply(clean_currency)
         tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
 
     is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
@@ -53,7 +62,6 @@ if not tab_df.empty:
     user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
     if user_q:
         with st.sidebar:
-            # Passing tab_df here ensures the AI sees the filtered and cleaned data
             ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
             st.session_state.chat_history.append({"q": user_q, "a": ans})
     
@@ -62,8 +70,8 @@ if not tab_df.empty:
         st.sidebar.write(f"AI: {chat['a']}")
         st.sidebar.divider()
 
-    # (Keep all your existing Leaderboard, Report, and Trends logic below this line)
     # --- DYNAMIC LEADERBOARDS ---
+    # Top 20 Keywords logic (GSC)
     if "GSC" in sel_tab.upper() and metric_name_col:
         st.subheader("Top 20 GSC Keywords")
         agg_k = 'min' if is_ranking else 'sum'
