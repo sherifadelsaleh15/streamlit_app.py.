@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-# API Keys - Use Streamlit secrets in production
+# API Keys
 try:
     import streamlit as st
     GROQ_KEY = st.secrets.get("GROQ_API_KEY", "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")
@@ -11,21 +11,21 @@ except:
     GROQ_KEY = os.getenv("GROQ_API_KEY", "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")
     GEMINI_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0")
 
-# Google Sheets configuration - Comment out if using sample data
-# SHEET_ID = "1L04CvR2MWLPMFQrv0K58ggG0Qe6lLTHJq3cl8hCOI3U"
+# ✅ YOUR CORRECT SHEET ID (extracted from your shared URL)
+SHEET_ID = "1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY"
 
-# Set to True to use sample data instead of Google Sheets
-USE_SAMPLE_DATA = True
-
-# Tab names - these will be used for both sample data and sheet names
+# ✅ CORRECT TAB NAMES - exactly as they appear in your sheet
 TABS = [
-    "GSC Performance",
-    "GSC Countries", 
-    "GSC Devices",
-    "GSC Queries",
-    "Rank Tracking"
+    "GA4_Data",
+    "Position_Tracking_Standard", 
+    "GA4_Top_Pages",
+    "SOCIAL_MEDIA",
+    "MASTER_FEED"
 ]
 
+# Set to False to use real Google Sheets
+USE_SAMPLE_DATA = False
+
 # App settings
-APP_TITLE = "2026 Strategic Dashboard"
+APP_TITLE = "2026 Strategic Dashboard - OKR Data"
 PASSWORD = "strategic_2026"
