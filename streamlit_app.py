@@ -19,7 +19,7 @@ GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- HELPER FUNCTIONS ---
 def get_ai_insight(df, tab_name):
-    """Gemini Token & Rate Limit Fix targeting 1.5-Flash."""
+    """Gemini Token & Rate Limit Fix targeting 3-Flash."""
     try:
         # 1. RPM Limit Check (ensuring ~5 requests per minute)
         if "last_gemini_call" in st.session_state:
@@ -33,7 +33,7 @@ def get_ai_insight(df, tab_name):
         
         # TARGETING 1.5-FLASH (matches your dashboard availability)
         genai.configure(api_key=GEMINI_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3-flash-preview')
         
         prompt = (f"Senior Strategic Analyst. Analyze: {tab_name} data:\n{data_summary}\n"
                   "Provide 3 hyper-concise executive bullet points.")
