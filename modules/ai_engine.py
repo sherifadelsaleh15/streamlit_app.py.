@@ -23,13 +23,13 @@ class AIEngine:
             st.error(f"Groq initialization failed: {str(e)}")
             self.groq_client = None
         
-        # Setup Gemini with your specific key
+        # Setup Gemini with your key
         try:
             genai.configure(api_key=GEMINI_KEY)
             # Try gemini-pro first (most stable)
             self.gemini_model = genai.GenerativeModel('gemini-pro')
             # Test the model
-            self.gemini_model.generate_content("test", generation_config={'max_output_tokens': 5})
+            test_response = self.gemini_model.generate_content("test")
             self.gemini_error = None
         except Exception as e:
             self.gemini_model = None
@@ -44,54 +44,46 @@ class AIEngine:
         return self.gemini_error
     
     def _prepare_data_context(self, df, tab_name):
-        """Prepare data context for AI analysis"""
+        """Prepare data context for AI analysis - works with your column naming"""
         try:
-            # Identify columns
-            loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
-            val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE', 'POSITION', 'IMPRESSIONS'])), None)
-            metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC', 'DEVICE'])), None)
-            date_col = 'dt'
+            # Find columns based on your standardized naming
+            loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['COUNTRY', 'REGION', 'GEO', 'LOCATION'])), None)
+            val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'IMPRESSIONS', 'CTR', 'POSITION', 'VALUE'])), None)
+            metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'DEVICE'])), None)
             
-            # Build context
-            if loc_col and val_col and date_col in df.columns:
-                monthly_df = df.copy()
-                monthly_df['Month'] = pd.to_datetime(monthly_df[date_col]).dt.strftime('%b %Y')
-                
-                context_parts = [f"DASHBOARD: {tab_name}"]
-                
-                # Regional/Metric breakdown
-                if metric_col:
-                    pivot_data = pd.pivot_table(
-                        monthly_df, 
-                        values=val_col, 
-                        index=['Month', metric_col], 
-                        columns=loc_col if loc_col else 'Region',
-                        aggfunc='sum', 
-                        fill_value=0
-                    )
-                    context_parts.append(f"\n[PERFORMANCE BREAKDOWN]:\n{pivot_data.to_string()}")
-                
-                # Totals
-                group_cols = [c for c in [loc_col, metric_col] if c]
-                if group_cols:
-                    totals = df.groupby(group_cols)[val_col].sum().reset_index()
-                    context_parts.append(f"\n[TOTAL BY {' / '.join(group_cols)}]:\n{totals.to_string()}")
-                
-                context = '\n'.join(context_parts)
-            else:
-                context = f"DASHBOARD: {tab_name}\n\n[RAW DATA SAMPLE]:\n{df.head(20).to_string()}"
+            context_parts = [f"DASHBOARD: {tab_name}"]
             
-            return context
+            # Add data summary
+            context_parts.append(f"\n[DATA OVERVIEW]")
+            context_parts.append(f"Rows: {len(df)}")
+            context_parts.append(f"Date range: {df['dt'].min()} to {df['dt'].max()}" if 'dt' in df.columns else "No date column")
+            
+            # Add regional breakdown if available
+            if loc_col and val_col:
+                summary = df.groupby(loc_col)[val_col].agg(['sum', 'mean', 'count']).reset_index()
+                context_parts.append(f"\n[PERFORMANCE BY {loc_col.upper()}]:")
+                context_parts.append(summary.to_string())
+            
+            # Add top metrics if available
+            if metric_col and val_col:
+                top_metrics = df.groupby(metric_col)[val_col].sum().nlargest(10).reset_index()
+                context_parts.append(f"\n[TOP 10 {metric_col.upper()}]:")
+                context_parts.append(top_metrics.to_string())
+            
+            # Add sample data
+            context_parts.append(f"\n[RAW DATA SAMPLE]:")
+            context_parts.append(df.head(10).to_string())
+            
+            return "\n".join(context_parts)
+            
         except Exception as e:
             return f"Error preparing context: {str(e)}\nDataFrame columns: {df.columns.tolist()}"
     
     def get_strategic_insight(self, df, tab_name, custom_prompt=None, use_gemini=False):
         """Get AI-powered strategic insights"""
         
-        # Prepare context
         data_context = self._prepare_data_context(df, tab_name)
         
-        # System prompt
         system_prompt = """You are a Senior Strategic Analyst specializing in digital marketing and business intelligence.
 
 Your task is to analyze the provided data and deliver:
@@ -100,14 +92,14 @@ Your task is to analyze the provided data and deliver:
 3. BUSINESS IMPLICATIONS: What do these numbers mean for the business?
 4. RECOMMENDATIONS: Specific, actionable next steps.
 
-Be direct, professional, and data-driven. Focus on strategic value, not just describing the numbers."""
+Be direct, professional, and data-driven. Focus on strategic value."""
 
         user_prompt = f"""
 {data_context}
 
 USER QUERY: {custom_prompt if custom_prompt else f'Analyze the performance in {tab_name} and provide strategic recommendations.'}
 
-Provide a concise but comprehensive strategic analysis (max 300 words).
+Provide a concise but comprehensive strategic analysis:
 """
         
         try:
@@ -131,7 +123,7 @@ Provide a concise but comprehensive strategic analysis (max 300 words).
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.2,
-                max_tokens=2048
+                max_tokens=1024
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -143,7 +135,6 @@ Provide a concise but comprehensive strategic analysis (max 300 words).
             return f"Gemini unavailable: {self.gemini_error}"
         
         try:
-            # Combine prompts
             full_prompt = f"{system_prompt}\n\n{user_prompt}"
             response = self.gemini_model.generate_content(full_prompt)
             return response.text
