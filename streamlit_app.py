@@ -4,10 +4,17 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from modules.data_loader import load_and_preprocess_data
+# from modules.ai_engine import get_ai_strategic_insight # REMOVED TO FIX PREVIOUS ERROR
 from utils import get_prediction
 from groq import Groq
 import google.generativeai as genai
-from fpdf import FPDF # New library for PDF generation
+
+# --- SAFE PDF IMPORT ---
+try:
+    from fpdf import FPDF
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 # 1. Page Config
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
