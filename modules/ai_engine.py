@@ -1,52 +1,74 @@
 import streamlit as st
-from groq import Groq
-import google.generativeai as genai
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import re
+from modules.data_loader import load_and_preprocess_data
+from modules.ai_engine import get_ai_strategic_insight
+from utils import get_prediction
 
-# --- API KEYS EMBEDDED ---
-GROQ_KEY = "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"
-GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
+# Must be the first streamlit command
+st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 
-def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
-    try:
-        # 1. Identify Columns
-        loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
-        val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE'])), None)
-        metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['METRIC', 'TYPE', 'KEYWORD', 'QUERY'])), None)
+# --- LOGIN SECURITY (Hardcoded Password) ---
+def check_password():
+    # SET YOUR PASSWORD HERE
+    ADMIN_PASSWORD = "strategic_2026" 
 
-        # 2. Build Summary (Fixes the "AI says 0" issue)
-        if loc_col and val_col:
-            group_cols = [loc_col]
-            if metric_col:
-                group_cols.append(metric_col)
-            
-            # This aggregates the data so the AI sees the true total for Portugal
-            summary_stats = df.groupby(group_cols)[val_col].sum().reset_index().to_string(index=False)
-            data_context = f"AGGREGATED TOTALS:\n{summary_stats}\n\nRAW DATA SAMPLE:\n{df.head(15).to_string()}"
+    def password_entered():
+        if st.session_state["password"] == ADMIN_PASSWORD:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"] 
         else:
-            data_context = df.head(50).to_string()
+            st.session_state["password_correct"] = False
 
-        # 3. Construct Prompts
-        system_msg = "You are a Strategic Data Analyst. Use the 'AGGREGATED TOTALS' section to answer. If a value is shown in totals, it is NOT zero."
-        user_msg = f"Data Context:\n{data_context}\n\nQuestion: {custom_prompt if custom_prompt else f'Analyze {tab_name}'}"
+    if "password_correct" not in st.session_state:
+        st.subheader("🔒 Digital Strategy Login")
+        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
+        st.error("😕 Password incorrect")
+        return False
+    else:
+        return True
 
-        # --- GEMINI ---
-        if engine == "gemini":
-            genai.configure(api_key=GEMINI_KEY)
-            model = genai.GenerativeModel(model_name='models/gemini-3-flash-preview')
-            response = model.generate_content(f"{system_msg}\n\n{user_msg}")
-            return response.text
+if not check_password():
+    st.stop()
 
-        # --- GROQ ---
-        else:
-            client = Groq(api_key=GROQ_KEY)
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg}
-                ]
-            )
-            return response.choices[0].message.content
+# --- INITIALIZE SESSION STATE ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "ai_report" not in st.session_state:
+    st.session_state.ai_report = ""
 
-    except Exception as e:
-        return f"AI Logic Error: {str(e)}"
+# --- DATA LOADING ---
+try:
+    df_dict = load_and_preprocess_data()
+except Exception as e:
+    st.error(f"Data Loading Error: {e}")
+    st.stop()
+
+sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
+tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
+
+if not tab_df.empty:
+    # --- DYNAMIC COLUMN MAPPING ---
+    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+    value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
+    date_col = 'dt'
+
+    # --- NUCLEAR CLEANING (Handles commas, strings, and symbols) ---
+    if value_col:
+        def clean_currency(x):
+            if isinstance(x, str):
+                # Regex: Keep only digits and decimal points
+                clean_str = re.sub(r'[^\d.]', '', x) 
+                return clean_str if clean_str else '0'
+            return x
+        tab_df[value_col] = tab_df[value_col].apply(clean_currency)
+        tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
+
+    # ... [Sidebar Filter and Charting logic continues below] ...
