@@ -21,14 +21,15 @@ def get_ai_insight(df, tab_name):
     try:
         data_summary = df.head(15).to_string()
         genai.configure(api_key=GEMINI_KEY)
+        # Fix for 404 Error: Using 2026 stable endpoints
         model_options = ['gemini-2.0-flash', 'gemini-3-flash-preview']
         for m_name in model_options:
             try:
                 model = genai.GenerativeModel(m_name)
-                response = model.generate_content(f"Analyze: {tab_name} data:\n{data_summary}")
+                response = model.generate_content(f"Analyze {tab_name} performance:\n{data_summary}")
                 return response.text
             except: continue
-        return "AI Error: Model endpoints unavailable."
+        return "AI Error: Model not responding."
     except Exception as e: return f"AI Error: {str(e)}"
 
 # 2. Authentication
@@ -52,15 +53,19 @@ sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # --- UNIVERSAL COLUMN DETECTION ---
-    # Metric (Y-Axis)
+    # --- DETECTION LOGIC ---
+    is_gsc = "GSC" in sel_tab.upper()
+    
+    # Generic Column Detection
+    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'LOCATION'])), None)
     click_col = next((c for c in tab_df.columns if 'CLICK' in c.upper()), None)
     pos_col = next((c for c in tab_df.columns if 'POSITION' in c.upper() or 'RANK' in c.upper()), None)
-    value_col = click_col if click_col else next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'USERS', 'VALUE', 'VIEWS', 'FOLLOWERS'])), None)
+    kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH'])), None)
     
-    # Label (X-Axis)
-    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'PAGE', 'URL', 'METRIC', 'PLATFORM'])), None)
-    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'LOCATION'])), None)
+    # Universal Value Assignment
+    value_col = click_col if click_col else next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'USERS', 'VALUE', 'VIEWS'])), None)
+    name_col = kw_col if (is_gsc or kw_col) else page_col
     date_col = 'dt'
 
     # --- SIDEBAR FILTERS ---
@@ -69,13 +74,13 @@ if not tab_df.empty:
         sel_locs = st.sidebar.multiselect(f"Filter Region", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # --- SIDEBAR: CHAT WITH DATA ---
+    # --- SIDEBAR: CHAT ---
     st.sidebar.divider()
     st.sidebar.subheader("Chat with Data")
     user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
     if user_q:
         client = Groq(api_key=GROQ_KEY)
-        ans = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": f"Context: {sel_tab}. Q: {user_q}"}])
+        ans = client.chat.completions.create(model="llama-3.3-70b-versatile", messages=[{"role": "user", "content": f"Tab: {sel_tab}. Q: {user_q}"}])
         st.sidebar.info(ans.choices[0].message.content)
 
     # --- MAIN CONTENT ---
@@ -84,32 +89,23 @@ if not tab_df.empty:
     # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
     with M:
-        # SPECIAL CASE: GSC (Keyword + Clicks + Position)
-        if "GSC" in sel_tab.upper() and metric_name_col and click_col and pos_col:
-            st.subheader("Keyword Performance: Clicks vs. Avg Position")
-            kw_perf = tab_df.groupby(metric_name_col).agg({click_col: 'sum', pos_col: 'mean'}).reset_index()
+        if is_gsc and kw_col and click_col and pos_col:
+            st.subheader("Top 20 Keywords: Clicks & Avg Position")
+            kw_perf = tab_df.groupby(kw_col).agg({click_col: 'sum', pos_col: 'mean'}).reset_index()
             kw_perf = kw_perf.sort_values(by=click_col, ascending=False).head(20)
             
             fig_gsc = go.Figure()
-            fig_gsc.add_trace(go.Bar(x=kw_perf[metric_name_col], y=kw_perf[click_col], name="Clicks", marker_color='#4285F4', yaxis='y1'))
-            fig_gsc.add_trace(go.Scatter(x=kw_perf[metric_name_col], y=kw_perf[pos_col], name="Avg Position", line=dict(color='#DB4437', width=3), yaxis='y2'))
+            fig_gsc.add_trace(go.Bar(x=kw_perf[kw_col], y=kw_perf[click_col], name="Clicks", marker_color='#4285F4', yaxis='y1'))
+            fig_gsc.add_trace(go.Scatter(x=kw_perf[kw_col], y=kw_perf[pos_col], name="Avg Position", line=dict(color='#DB4437', width=3), yaxis='y2'))
             fig_gsc.update_layout(template="plotly_white", yaxis=dict(title="Clicks"), 
                                   yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"),
                                   legend=dict(orientation="h", y=1.1))
             st.plotly_chart(fig_gsc, use_container_width=True)
 
-        # GENERAL CASE: All other sheets (GA4, Social, Feed)
-        elif metric_name_col and value_col:
-            st.subheader(f"Top 20 {metric_name_col.replace('_', ' ')} by {value_col.replace('_', ' ')}")
-            is_ranking = 'POSITION' in value_col.upper() or 'RANK' in value_col.upper()
-            agg_type = 'mean' if is_ranking else 'sum'
-            
-            top_gen = tab_df.groupby(metric_name_col)[value_col].agg(agg_type).reset_index()
-            top_gen = top_gen.sort_values(by=value_col, ascending=is_ranking).head(20)
-            
-            fig_gen = px.bar(top_gen.iloc[::-1], x=value_col, y=metric_name_col, orientation='h', 
-                             template="plotly_white", color_discrete_sequence=['#34A853'], text=value_col)
-            if is_ranking: fig_gen.update_layout(xaxis=dict(autorange="reversed"))
+        elif name_col and value_col:
+            st.subheader(f"Top Performance View: {name_col}")
+            top_gen = tab_df.groupby(name_col)[value_col].sum().reset_index().sort_values(by=value_col, ascending=True).tail(20)
+            fig_gen = px.bar(top_gen, x=value_col, y=name_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'], text=value_col)
             st.plotly_chart(fig_gen, use_container_width=True)
 
     st.divider()
@@ -121,29 +117,37 @@ if not tab_df.empty:
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS ---
-    st.subheader(f"Monthly Performance Trends (Top {metric_name_col if metric_name_col else 'Items'})")
-    if metric_name_col and value_col and date_col in tab_df.columns:
-        is_pos = 'POSITION' in value_col.upper()
-        top_items = tab_df.groupby(metric_name_col)[value_col].agg('mean' if is_pos else 'sum').sort_values(ascending=is_pos).head(20).index.tolist()
+    # --- TRENDS: BRANCHED BY GSC VS OTHERS ---
+    if is_gsc:
+        st.subheader("Monthly Performance Trends (By Keyword)")
+        top_items = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).index.tolist()
         
-        # Display regional groupings if region exists
-        loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
-
-        for loc in loc_list:
-            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
-            st.markdown(f"### Group: {loc if loc else 'Global'}")
-            
-            for item in [i for i in top_items if i in loc_data[metric_name_col].unique()]:
-                item_data = loc_data[loc_data[metric_name_col] == item].sort_values('dt')
-                with st.expander(f"Trend for: {item}"):
+        for item in top_items:
+            item_data = tab_df[tab_df[kw_col] == item].sort_values('dt')
+            with st.expander(f"Keyword Trend: {item}"):
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    fig_k = px.line(item_data, x='dt', y=click_col, markers=True)
+                    if pos_col in item_data.columns:
+                        fig_k.add_trace(go.Scatter(x=item_data['dt'], y=item_data[pos_col], name="Position", yaxis="y2", line=dict(dash='dot')))
+                        fig_k.update_layout(yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"))
+                    st.plotly_chart(fig_k, use_container_width=True, key=f"k_tr_{item}")
+                with c2:
+                    st.dataframe(item_data[['dt', click_col, pos_col]].dropna(axis=1), hide_index=True)
+    else:
+        st.subheader("Monthly Performance Trends (By Region)")
+        if loc_col and value_col and date_col in tab_df.columns:
+            loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany')
+            for loc in loc_list:
+                loc_data = tab_df[tab_df[loc_col] == loc].sort_values('dt')
+                with st.expander(f"Region Trend: {loc}", expanded=(loc == 'Germany')):
                     c1, c2 = st.columns([3, 1])
                     with c1:
-                        fig_tr = px.line(item_data, x='dt', y=value_col, markers=True, title=f"{item} Trend")
-                        if is_pos: fig_tr.update_layout(yaxis=dict(autorange="reversed"))
-                        st.plotly_chart(fig_tr, use_container_width=True, key=f"tr_{item}_{loc}")
+                        fig_loc = px.line(loc_data.groupby('dt')[value_col].sum().reset_index(), x='dt', y=value_col, markers=True)
+                        st.plotly_chart(fig_loc, use_container_width=True, key=f"loc_tr_{loc}")
                     with c2:
-                        st.dataframe(item_data[['dt', value_col]].assign(dt=lambda x: x['dt'].dt.strftime('%b %Y')), hide_index=True)
+                        st.write("Regional Stats")
+                        st.dataframe(loc_data.groupby('dt')[value_col].sum().reset_index(), hide_index=True)
 
 else:
-    st.info("No data detected. Please check your source sheet.")
+    st.info("Please select a dashboard section to view data.")
