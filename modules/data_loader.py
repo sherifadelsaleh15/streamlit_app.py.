@@ -1,28 +1,38 @@
-url = base_url + tab.replace(" ", "%20")
+import pandas as pd
+import streamlit as st
 
-try:
-    df = pd.read_csv(url).dropna(how='all').dropna(axis=1, how='all')
 
-    # Standardize Columns
-    df.columns = [
-        c.replace(' ', '_').replace('/', '_')
-        for c in df.columns
-    ]
+def load_and_preprocess_data(base_url, tabs):
+    all_data = {}
 
-    # Standardize Date Column
-    for col in ['Month', 'Date_Month', 'dt', 'Month_Date']:
-        if col in df.columns:
-            df['dt'] = pd.to_datetime(df[col], errors='coerce')
-            break
+    for tab in tabs:
+        url = base_url + tab.replace(" ", "%20")
 
-    # Handle Numeric Data for Rankings
-    if 'Value_Position' in df.columns:
-        df['Value_Position'] = pd.to_numeric(
-            df['Value_Position'],
-            errors='coerce'
-        )
+        try:
+            df = pd.read_csv(url).dropna(how='all').dropna(axis=1, how='all')
 
-    all_data[tab] = df
+            # Standardize Columns
+            df.columns = [
+                c.replace(' ', '_').replace('/', '_')
+                for c in df.columns
+            ]
 
-except Exception as e:
-    st.error(f"Error loading tab {tab}: {e}")
+            # Standardize Date Column
+            for col in ['Month', 'Date_Month', 'dt', 'Month_Date']:
+                if col in df.columns:
+                    df['dt'] = pd.to_datetime(df[col], errors='coerce')
+                    break
+
+            # Handle Numeric Data
+            if 'Value_Position' in df.columns:
+                df['Value_Position'] = pd.to_numeric(
+                    df['Value_Position'],
+                    errors='coerce'
+                )
+
+            all_data[tab] = df
+
+        except Exception as e:
+            st.error(f"Error loading tab {tab}: {e}")
+
+    return all_data
