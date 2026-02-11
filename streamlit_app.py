@@ -13,7 +13,7 @@ from modules.ml_models import generate_forecast
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 
-# Safe PDF Library Import
+# Safe PDF Support
 try:
     from fpdf import FPDF
     PDF_SUPPORT = True
@@ -25,32 +25,14 @@ GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 # --- HELPER FUNCTIONS ---
-
-def generate_pdf(report_text, tab_name):
-    if not PDF_SUPPORT:
-        return None
-    try:
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", 'B', 16)
-        pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
-        pdf.set_font("Arial", size=12)
-        pdf.ln(10)
-        clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
-        pdf.multi_cell(0, 10, txt=clean_text)
-        return pdf.output(dest='S').encode('latin-1')
-    except Exception:
-        return None
-
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
     try:
         data_summary = df.head(15).to_string()
-        system_msg = "Senior Strategic Analyst. Provide business implications and regional comparisons."
-        user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else 'Analyze data'}"
+        system_msg = "Senior Strategic Analyst. Compare performance across regions and provide implications."
+        user_msg = f"Tab: {tab_name}\nQuestion: {custom_prompt if custom_prompt else 'Analyze regional performance'}"
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Use 1.5-flash as the primary stable model
             for model_name in ['gemini-1.5-flash', 'gemini-pro']:
                 try:
                     model = genai.GenerativeModel(model_name)
@@ -58,104 +40,88 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
                     return response.text
                 except Exception:
                     continue
-            return "Gemini models currently unreachable."
+            return "Gemini unreachable."
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}
-                ]
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}]
             )
             return response.choices[0].message.content
     except Exception as e:
         return f"AI Error: {str(e)}"
 
 # 2. Authentication
-def check_password():
-    if "password_correct" not in st.session_state:
-        st.subheader("Strategy Login")
-        pwd = st.text_input("Enter Key", type="password")
-        if st.button("Submit"):
-            if pwd == "strategic_2026":
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("Denied")
-        return False
-    return True
-
-if not check_password():
+if "password_correct" not in st.session_state:
+    st.subheader("Strategy Login")
+    pwd = st.text_input("Enter Key", type="password")
+    if st.button("Submit"):
+        if pwd == "strategic_2026":
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("Denied")
     st.stop()
 
-# 3. State Setup
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "ai_report" not in st.session_state: st.session_state.ai_report = ""
-if "last_q" not in st.session_state: st.session_state.last_q = ""
-
-# 4. Data Loading
+# 3. Data Loading
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
     st.error(f"Data loading failed: {e}")
     st.stop()
 
-# 5. Sidebar Navigation and Chat
+# 4. Sidebar Navigation & Filtering
 sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
+# Restore Original Country/Region Filtering
+loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+
+if loc_col and not tab_df.empty:
+    all_locs = sorted(tab_df[loc_col].unique().tolist())
+    # Default to Germany if present, else all
+    default_locs = [l for l in all_locs if l == 'Germany'] or all_locs
+    selected_locs = st.sidebar.multiselect(f"Filter by {loc_col}", all_locs, default=default_locs)
+    tab_df = tab_df[tab_df[loc_col].isin(selected_locs)]
+
+# 5. Main Dashboard Layout (Restored Charts)
+st.title(f"Strategic View: {sel_tab}")
+
 if not tab_df.empty:
-    # Sidebar Filters
-    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
-    if loc_col:
-        u_locs = sorted(tab_df[loc_col].unique().tolist(), key=lambda x: x != 'Germany')
-        sel_locs = st.sidebar.multiselect("Filter Regions", u_locs, default=u_locs)
-        tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
-
-    # Sidebar Exports
-    st.sidebar.divider()
-    st.sidebar.subheader("Exports")
-    if st.session_state.ai_report and PDF_SUPPORT:
-        pdf_data = generate_pdf(st.session_state.ai_report, sel_tab)
-        if pdf_data:
-            st.sidebar.download_button("Download Report (PDF)", data=pdf_data, file_name=f"Analysis_{sel_tab}.pdf")
-    
-    try:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            tab_df.to_excel(writer, index=False)
-        st.sidebar.download_button("Download Data (Excel)", data=buf.getvalue(), file_name=f"Data_{sel_tab}.xlsx")
-    except:
-        pass
-
-    # Sidebar Chat (Groq)
-    st.sidebar.divider()
-    st.sidebar.subheader("Strategic Chat")
-    q = st.sidebar.text_input("Ask about this view", key="chat_input")
-    if q and q != st.session_state.last_q:
-        ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=q)
-        st.session_state.chat_history.append({"q": q, "a": ans})
-        st.session_state.last_q = q
-
-    for c in reversed(st.session_state.chat_history):
-        st.sidebar.text(f"User: {c['q']}")
-        st.sidebar.info(c['a'])
-
-    # 6. Main Dashboard Area
-    st.title(f"Strategic View: {sel_tab}")
-    
-    # Identify Data Columns
+    # Identify Metrics and Dimensions
     val_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'VALUE', 'VALUE_POSITION'])), None)
     name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'METRIC'])), None)
-    
-    if val_col and name_col:
-        st.subheader("Performance Overview")
-        top_data = tab_df.groupby(name_col)[val_col].sum().nlargest(15).reset_index()
-        fig = px.bar(top_data, x=val_col, y=name_col, orientation='h', color_discrete_sequence=['#004B95'])
-        st.plotly_chart(fig, use_container_width=True, key="main_bar")
 
-    # Forecasting (from modules/ml_models.py)
+    # Metric Row (Summary)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Count", len(tab_df))
+    with col2:
+        if val_col:
+            st.metric(f"Total {val_col.replace('_', ' ')}", f"{tab_df[val_col].sum():,.0f}")
+    with col3:
+        if loc_col:
+            st.metric("Active Regions", len(selected_locs))
+
+    st.divider()
+
+    # Regional Breakdown Chart
+    if loc_col and val_col:
+        st.subheader("Performance by Region/Country")
+        reg_df = tab_df.groupby(loc_col)[val_col].sum().reset_index()
+        fig_reg = px.pie(reg_df, values=val_col, names=loc_col, hole=0.4, 
+                         color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig_reg, use_container_width=True)
+
+    # Metric Comparison Chart
+    if val_col and name_col:
+        st.subheader(f"Top 15 {name_col.replace('_', ' ')} by {val_col.replace('_', ' ')}")
+        top_df = tab_df.groupby([name_col, loc_col])[val_col].sum().reset_index()
+        fig_bar = px.bar(top_df.nlargest(15, val_col), x=val_col, y=name_col, 
+                         color=loc_col, orientation='h', barmode='group')
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Forecast Section
     if val_col and 'dt' in tab_df.columns:
         st.divider()
         st.subheader("3-Month Strategic Forecast")
@@ -163,17 +129,15 @@ if not tab_df.empty:
         if not forecast_df.empty:
             fig_trend = go.Figure()
             hist_df = tab_df.groupby('dt')[val_col].sum().reset_index()
-            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical", line=dict(color='gray')))
-            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash', color='blue')))
-            st.plotly_chart(fig_trend, use_container_width=True, key="trend_chart")
+            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical"))
+            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash')))
+            st.plotly_chart(fig_trend, use_container_width=True)
 
-    # Strategic AI Analysis (Gemini)
+    # AI Insight Section
     st.divider()
-    st.subheader("Executive Analysis")
-    if st.button("Generate Strategic AI Report"):
-        with st.spinner("Analyzing performance data..."):
-            st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
-            st.rerun()
-    
-    if st.session_state.ai_report:
-        st.markdown(st.session_state.ai_report)
+    if st.button("Generate Regional Analysis"):
+        with st.spinner("Analyzing..."):
+            report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
+            st.markdown(report)
+else:
+    st.warning("No data available for the selected filters.")
