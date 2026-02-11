@@ -4,10 +4,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 from modules.data_loader import load_and_preprocess_data
-# We will define the logic for get_ai_strategic_insight locally to ensure it works with your specific context
+from modules.ai_engine import get_ai_strategic_insight
 from utils import get_prediction
 from groq import Groq
 import google.generativeai as genai
+from fpdf import FPDF # New library for PDF generation
 
 # 1. Page Config
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
@@ -16,50 +17,43 @@ st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
+# --- PDF HELPER FUNCTION ---
+def generate_pdf(report_text, tab_name):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(200, 10, txt=f"Strategic Report: {tab_name}", ln=True, align='C')
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+    # Clean text to avoid encoding errors
+    clean_text = report_text.encode('latin-1', 'ignore').decode('latin-1')
+    pdf.multi_cell(0, 10, txt=clean_text)
+    return pdf.output(dest='S').encode('latin-1')
+
 # --- CORE FUNCTIONS ---
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
-        # 1. Identify Columns
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
         val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE'])), None)
         metric_col = next((c for c in df.columns if any(x in c.upper() for x in ['METRIC', 'TYPE', 'KEYWORD', 'QUERY'])), None)
         date_col = 'dt'
 
-        # 2. Build Comparison Data Context
         if loc_col and val_col:
             monthly_df = df.copy()
             monthly_df['Month'] = monthly_df[date_col].dt.strftime('%b %Y')
-            
-            # Comparison Matrix (Region vs Metric vs Month)
             comparison_matrix = monthly_df.groupby([loc_col, 'Month', metric_col if metric_col else loc_col])[val_col].sum().unstack(level=0).fillna(0)
-            
-            # Simple Totals
             group_total = [loc_col]
             if metric_col: group_total.append(metric_col)
             totals_str = df.groupby(group_total)[val_col].sum().reset_index().to_string(index=False)
 
-            data_context = f"""
-            SYSTEM STRATEGIC DATA:
-            [REGIONAL COMPARISON MATRIX (Monthly)]:
-            {comparison_matrix.to_string()}
-            
-            [LIFETIME TOTALS PER REGION]:
-            {totals_str}
-            """
+            data_context = f"SYSTEM STRATEGIC DATA:\n[MATRIX]:\n{comparison_matrix.to_string()}\n\n[TOTALS]:\n{totals_str}"
         else:
             data_context = df.head(50).to_string()
 
-        # 3. Enhanced Comparison Instructions
-        system_msg = """You are a Senior Strategic Analyst. 
-        - When asked to compare countries, use the COMPARISON MATRIX to find differences in growth, volume, and monthly trends.
-        - Identify which market is leading and which is lagging.
-        - If data for a month is 0 in the matrix, interpret it as 'No Activity' for that specific period.
-        - Be critical: don't just state the numbers, explain what the gap between markets means for the business."""
-
+        system_msg = "Senior Strategic Analyst comparison instructions applied."
         user_msg = f"Dashboard Tab: {tab_name}\n\nUser Question: {custom_prompt if custom_prompt else f'Compare the regional performance in {tab_name}'}"
 
-        # --- ENGINES ---
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
             model = genai.GenerativeModel(model_name='models/gemini-3-flash-preview')
@@ -69,10 +63,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": f"{user_msg}\n\nData Context:\n{data_context}"}
-                ]
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\n\nData Context:\n{data_context}"}]
             )
             return response.choices[0].message.content
     except Exception as e:
@@ -86,7 +77,6 @@ def check_password():
             del st.session_state["password"] 
         else:
             st.session_state["password_correct"] = False
-            
     if "password_correct" not in st.session_state:
         st.subheader("🔒 Digital Strategy Login")
         st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
@@ -95,21 +85,16 @@ def check_password():
         st.text_input("Enter Dashboard Password", type="password", on_change=password_entered, key="password")
         st.error("😕 Password incorrect")
         return False
-    else: 
-        return True
-
-# --- MAIN APP EXECUTION ---
+    else: return True
 
 if not check_password():
     st.stop()
 
-# 3. Initialize Session State
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "ai_report" not in st.session_state:
     st.session_state.ai_report = ""
 
-# 4. Load Data
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
@@ -120,14 +105,11 @@ sel_tab = st.sidebar.selectbox("Select Tab", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # Identify Columns
     loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
     value_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
     metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
-    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
 
-    # Nuclear Cleaning
     if value_col:
         def clean_currency(x):
             if isinstance(x, str):
@@ -139,17 +121,16 @@ if not tab_df.empty:
 
     is_ranking = "POSITION" in sel_tab.upper() or "TRACKING" in sel_tab.upper()
 
-    # Sidebar Filter
     if loc_col:
         raw_locs = tab_df[loc_col].dropna().unique()
         all_locs = sorted([str(x) for x in raw_locs], key=lambda x: x != 'Germany')
         sel_locs = st.sidebar.multiselect(f"Filter Region", all_locs, default=all_locs)
         tab_df = tab_df[tab_df[loc_col].isin(sel_locs)]
 
-    # Chat with Data (Groq)
+    # Sidebar Chat
     st.sidebar.divider()
     st.sidebar.subheader("Chat with Data")
-    user_q = st.sidebar.text_input("Ask a question about this data:", key="user_input")
+    user_q = st.sidebar.text_input("Ask a question:", key="user_input")
     if user_q:
         with st.sidebar:
             ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=user_q)
@@ -158,12 +139,10 @@ if not tab_df.empty:
     for chat in reversed(st.session_state.chat_history):
         st.sidebar.info(f"User: {chat['q']}")
         st.sidebar.write(f"AI: {chat['a']}")
-        st.sidebar.divider()
 
     # Main Visuals
     st.title(f"Strategic View: {sel_tab}")
     
-    # GSC Chart
     if "GSC" in sel_tab.upper() and metric_name_col:
         st.subheader("Top 20 Keywords")
         agg_k = 'min' if is_ranking else 'sum'
@@ -173,16 +152,28 @@ if not tab_df.empty:
         if is_ranking: fig_k.update_layout(xaxis=dict(autorange="reversed"))
         st.plotly_chart(fig_k, use_container_width=True)
 
-    # Gemini Report
+    # Gemini Report Section
     st.subheader("Strategic AI Report")
-    if st.button("Generate Executive Analysis"):
+    c1, c2 = st.columns([1, 4])
+    with c1:
+        gen_btn = st.button("Generate Analysis")
+    
+    if gen_btn:
         with st.spinner("Analyzing..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
     
     if st.session_state.ai_report:
+        # PDF DOWNLOAD FEATURE
+        pdf_data = generate_pdf(st.session_state.ai_report, sel_tab)
+        st.download_button(
+            label="📥 Download Report as PDF",
+            data=pdf_data,
+            file_name=f"Strategic_Report_{sel_tab}.pdf",
+            mime="application/pdf"
+        )
         st.markdown(st.session_state.ai_report)
 
-    # Monthly Trends
+    # Trends
     st.divider()
     st.subheader("Monthly Performance Trends")
     if metric_name_col and value_col and date_col in tab_df.columns:
