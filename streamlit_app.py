@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
-from modules.data_loader import load_and_preprocess_data
+import os
+import sys
 
-# Tabs Logic - Importing separate modules
-from tabs.gsc_tab import render_gsc_content
-from tabs.ga4_tab import render_ga4_content
+# Ensure Python looks in the current directory for the tabs folder
+sys.path.append(os.path.dirname(__file__))
+
+from modules.data_loader import load_and_preprocess_data
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
@@ -32,6 +34,8 @@ tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 if not tab_df.empty:
     # ROUTING TO SEPARATE FILES
     if "GSC" in sel_tab.upper():
-        render_gsc_content(tab_df, sel_tab)
+        from tabs.gsc_tab import render_gsc
+        render_gsc(tab_df, sel_tab)
     else:
-        render_ga4_content(tab_df, sel_tab)
+        from tabs.ga4_tab import render_ga4
+        render_ga4(tab_df, sel_tab)
