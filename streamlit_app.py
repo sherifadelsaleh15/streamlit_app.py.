@@ -24,7 +24,12 @@ def get_ai_insight(df, tab_name):
         genai.configure(api_key=GEMINI_KEY)
         
         # FIX: Try multiple model strings to avoid the 404 error
-        model_options = ['gemini-1.5-flash', 'gemini-pro']
+       # Updated for 2026 model availability
+model_options = [
+    'gemini-2.0-flash',  # Current stable default
+    'gemini-3-flash-preview', # Latest generation
+    'gemini-2.5-flash'  # Stable backup
+]
         for m_name in model_options:
             try:
                 model = genai.GenerativeModel(m_name)
