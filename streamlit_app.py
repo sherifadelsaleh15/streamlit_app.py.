@@ -7,12 +7,13 @@ from modules.data_loader import load_and_preprocess_data
 from modules.ai_engine import get_ai_strategic_insight
 from utils import get_prediction
 
-# Must be the very first Streamlit command
+# Must be the FIRST streamlit command
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 
-# --- 1. LOGIN SECURITY ---
+# --- 1. LOGIN SECURITY SYSTEM ---
 def check_password():
     def password_entered():
+        # Check against secret APP_PASSWORD
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"] 
@@ -30,8 +31,9 @@ def check_password():
     else:
         return True
 
+# STOP if not authorized
 if not check_password():
-    st.stop()  # Prevents code from running until password is correct
+    st.stop()
 
 # --- 2. INITIALIZE SESSION STATE ---
 if "chat_history" not in st.session_state:
@@ -56,14 +58,15 @@ if not tab_df.empty:
     page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
 
-    # --- 4. DATA CLEANING (NUCLEAR OPTION) ---
+    # --- 4. NUCLEAR DATA CLEANING ---
     if value_col:
         def clean_currency(x):
             if isinstance(x, str):
+                # Strips everything that isn't a digit or a decimal dot
                 clean_str = re.sub(r'[^\d.]', '', x) 
                 return clean_str if clean_str else '0'
             return x
         tab_df[value_col] = tab_df[value_col].apply(clean_currency)
         tab_df[value_col] = pd.to_numeric(tab_df[value_col], errors='coerce').fillna(0)
 
-    # ... Rest of your original Sidebar, Leaderboards, and Trend logic ...
+    # ... [Rest of your Sidebar, Leaderboards, and Trend code continues here] ...
