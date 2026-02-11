@@ -7,7 +7,7 @@ from modules.sample_data import get_sample_data
 
 def load_and_preprocess_data():
     """Loads all tabs and standardizes column names for consistency."""
-    base_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
+    base_url = f"https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/edit?usp=sharing"/gviz/tq?tqx=out:csv&sheet="
 def load_from_google_sheets():
     """Attempt to load data from Google Sheets"""
     base_url = f"https://docs.google.com/spreadsheets/d/1QFIhc5g1FeMj-wQSL7kucsAyhgurxH9mqP3cmC1mcFY/edit?usp=sharing/gviz/tq?tqx=out:csv&sheet="
