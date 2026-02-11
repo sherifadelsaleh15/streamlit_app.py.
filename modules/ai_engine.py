@@ -3,13 +3,11 @@ from groq import Groq
 import google.generativeai as genai
 
 # --- API KEY CONFIGURATION ---
-# I have added your keys here as requested to prevent connection errors.
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
-        # Prepare a small data sample for the AI to read
         data_summary = df.head(30).to_string() 
         
         system_msg = (
@@ -27,11 +25,13 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
         if engine == "gemini":
             try:
                 genai.configure(api_key=GEMINI_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                # Using 'gemini-pro' as it is the most stable endpoint for generateContent
+                model = genai.GenerativeModel('gemini-pro')
                 response = model.generate_content(f"{system_msg}\n\n{user_msg}")
                 return response.text
             except Exception as e:
-                return f"Gemini connection failed: {str(e)}"
+                # If 'gemini-pro' fails, it might be a library version issue
+                return f"Gemini connection failed. Error: {str(e)}. Try updating your google-generativeai library."
 
         # --- GROQ LOGIC (Chat with Data) ---
         if engine == "groq":
