@@ -6,14 +6,14 @@ import io
 import google.generativeai as genai
 from groq import Groq
 
-# Zero-indentation imports from your modules
+# Zero-indentation imports
 from modules.data_loader import load_and_preprocess_data
 from modules.ml_models import generate_forecast
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 
-# Safe PDF Library Import
+# Safe PDF Support
 try:
     from fpdf import FPDF
     PDF_SUPPORT = True
@@ -50,7 +50,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
-            # Standardized model fallback to bypass 404 errors
+            # Standardized fallback to bypass the 404 error
             for model_name in ['gemini-1.5-flash', 'gemini-pro']:
                 try:
                     model = genai.GenerativeModel(model_name)
@@ -58,31 +58,28 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
                     return response.text
                 except Exception:
                     continue
-            return "Gemini models unreachable at this moment."
+            return "Gemini models unreachable."
         else:
             client = Groq(api_key=GROQ_KEY)
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}
-                ]
+                messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": f"{user_msg}\nData:\n{data_summary}"}]
             )
             return response.choices[0].message.content
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-# 2. Authentication Logic
+# 2. Authentication
 def check_password():
     if "password_correct" not in st.session_state:
         st.subheader("Dashboard Login")
-        pwd = st.text_input("Access Key", type="password")
+        pwd = st.text_input("Password", type="password")
         if st.button("Log In"):
             if pwd == "strategic_2026":
                 st.session_state["password_correct"] = True
                 st.rerun()
             else:
-                st.error("Incorrect Password")
+                st.error("Denied")
         return False
     return True
 
@@ -94,77 +91,77 @@ if "chat_history" not in st.session_state: st.session_state.chat_history = []
 if "ai_report" not in st.session_state: st.session_state.ai_report = ""
 if "last_q" not in st.session_state: st.session_state.last_q = ""
 
-# 4. Data Loading via modules/data_loader.py
+# 4. Data Loading
 try:
     df_dict = load_and_preprocess_data()
 except Exception as e:
-    st.error(f"Data Connection Error: {e}")
+    st.error(f"Data error: {e}")
     st.stop()
 
-# 5. Sidebar Interface
-sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
+# 5. Sidebar
+sel_tab = st.sidebar.selectbox("Select View", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # Exports
+    # Sidebar Exports
     st.sidebar.divider()
-    st.sidebar.subheader("Export Options")
+    st.sidebar.subheader("Exports")
     if st.session_state.ai_report and PDF_SUPPORT:
         pdf_data = generate_pdf(st.session_state.ai_report, sel_tab)
         if pdf_data:
-            st.sidebar.download_button("Download Analysis (PDF)", data=pdf_data, file_name=f"Analysis_{sel_tab}.pdf")
+            st.sidebar.download_button("Download PDF", data=pdf_data, file_name="Report.pdf")
     
     try:
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
             tab_df.to_excel(writer, index=False)
-        st.sidebar.download_button("Export Raw Data (Excel)", data=buf.getvalue(), file_name=f"Data_{sel_tab}.xlsx")
+        st.sidebar.download_button("Export Excel", data=buf.getvalue(), file_name="Data.xlsx")
     except Exception:
         pass
 
-    # Sidebar Chat (Groq)
+    # Sidebar Chat
     st.sidebar.divider()
     st.sidebar.subheader("Strategic Chat")
-    q = st.sidebar.text_input("Ask about current view", key="chat_input")
+    q = st.sidebar.text_input("Ask a question", key="chat_input")
     if q and q != st.session_state.last_q:
         ans = get_ai_strategic_insight(tab_df, sel_tab, engine="groq", custom_prompt=q)
         st.session_state.chat_history.append({"q": q, "a": ans})
         st.session_state.last_q = q
 
     for c in reversed(st.session_state.chat_history):
-        st.sidebar.text(f"User: {c['q']}")
+        st.sidebar.text(f"Q: {c['q']}")
         st.sidebar.info(c['a'])
 
-    # 6. Main Dashboard View
-    st.title(f"2026 Strategy: {sel_tab}")
+    # 6. Main Dashboard
+    st.title(f"Strategic View: {sel_tab}")
     
-    # Column mapping based on your data_loader logic
+    # Identify Metric Columns
     val_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'VALUE', 'VALUE_POSITION'])), None)
     name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'METRIC'])), None)
     
     if val_col and name_col:
-        st.subheader("Performance Distribution")
+        st.subheader("Performance Breakdown")
         top_data = tab_df.groupby(name_col)[val_col].sum().nlargest(15).reset_index()
-        fig = px.bar(top_data, x=val_col, y=name_col, orientation='h', color_discrete_sequence=['#075EAF'])
+        fig = px.bar(top_data, x=val_col, y=name_col, orientation='h')
         st.plotly_chart(fig, use_container_width=True)
 
-    # Forecasting (via modules/ml_models.py)
+    # Forecasting (from modules/ml_models.py)
     if val_col and 'dt' in tab_df.columns:
         st.divider()
-        st.subheader("Performance Forecast")
+        st.subheader("3-Month Strategic Forecast")
         forecast_df = generate_forecast(tab_df, val_col)
         if not forecast_df.empty:
             fig_trend = go.Figure()
             hist_df = tab_df.groupby('dt')[val_col].sum().reset_index()
-            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical Data"))
-            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="3-Month Forecast", line=dict(dash='dash', color='red')))
+            fig_trend.add_trace(go.Scatter(x=hist_df['dt'], y=hist_df[val_col], name="Historical"))
+            fig_trend.add_trace(go.Scatter(x=forecast_df['dt'], y=forecast_df[val_col], name="Forecast", line=dict(dash='dash')))
             st.plotly_chart(fig_trend, use_container_width=True)
 
     # Strategic AI Report (Gemini)
     st.divider()
     st.subheader("Executive Analysis")
-    if st.button("Generate Detailed Analysis"):
-        with st.spinner("Gemini is analyzing market data..."):
+    if st.button("Generate Strategic Analysis"):
+        with st.spinner("Analyzing..."):
             st.session_state.ai_report = get_ai_strategic_insight(tab_df, sel_tab, engine="gemini")
             st.rerun()
     
