@@ -33,6 +33,7 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None):
 
         if engine == "gemini":
             genai.configure(api_key=GEMINI_KEY)
+            # Use 1.5-flash and pro as fallbacks to avoid 404s
             for model_name in ['gemini-1.5-flash', 'gemini-pro']:
                 try:
                     model = genai.GenerativeModel(model_name)
@@ -105,7 +106,7 @@ if not tab_df.empty:
 
     st.divider()
 
-    # Regional Breakdown Chart
+    # Regional Breakdown Chart (The Donut Chart)
     if loc_col and val_col:
         st.subheader("Performance by Region/Country")
         reg_df = tab_df.groupby(loc_col)[val_col].sum().reset_index()
@@ -113,9 +114,10 @@ if not tab_df.empty:
                          color_discrete_sequence=px.colors.qualitative.Pastel)
         st.plotly_chart(fig_reg, use_container_width=True)
 
-    # Metric Comparison Chart
+    # Metric Comparison Chart (Grouped Bar Chart)
     if val_col and name_col:
         st.subheader(f"Top 15 {name_col.replace('_', ' ')} by {val_col.replace('_', ' ')}")
+        # Grouping by both metric name and country to see them side-by-side
         top_df = tab_df.groupby([name_col, loc_col])[val_col].sum().reset_index()
         fig_bar = px.bar(top_df.nlargest(15, val_col), x=val_col, y=name_col, 
                          color=loc_col, orientation='h', barmode='group')
