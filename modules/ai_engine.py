@@ -8,18 +8,18 @@ GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
 def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, forecast_df=None):
     try:
-        # --- FIX: AGGREGATE SUMMARY FOR AI ---
-        # This ensures the AI sees the totals for ALL selected regions, not just the first rows.
+        # --- FIX: CREATE DATA SUMMARY ---
+        # This ensures the AI sees totals for every country, preventing "0" errors.
         loc_col = next((c for c in df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO'])), None)
-        val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'USERS', 'SESSIONS', 'VALUE'])), None)
+        val_col = next((c for c in df.columns if any(x in c.upper() for x in ['CLICKS', 'SESSIONS', 'USERS', 'VALUE'])), None)
         
         if loc_col and val_col:
             summary_stats = df.groupby(loc_col)[val_col].sum().reset_index().to_string()
-            data_context = f"Total metrics per Region/Country:\n{summary_stats}\n\nDetailed rows (Sample):\n{df.head(20).to_string()}"
+            data_context = f"AGGREGATED TOTALS PER REGION:\n{summary_stats}\n\nDATA SAMPLE:\n{df.head(20).to_string()}"
         else:
             data_context = df.head(50).to_string()
 
-        system_msg = "You are a Strategic Data Analyst. Use the summarized data provided to answer precisely."
+        system_msg = "You are a Strategic Data Analyst. Use the 'AGGREGATED TOTALS' to provide accurate performance metrics."
         user_msg = f"Data Context:\n{data_context}\n\nQuestion: {custom_prompt if custom_prompt else f'Analyze {tab_name}'}"
 
         # --- GEMINI ---
@@ -42,4 +42,4 @@ def get_ai_strategic_insight(df, tab_name, engine="groq", custom_prompt=None, fo
             return response.choices[0].message.content
 
     except Exception as e:
-        return f"AI Engine Error: {str(e)}"
+        return f"AI Logic Error: {str(e)}"
