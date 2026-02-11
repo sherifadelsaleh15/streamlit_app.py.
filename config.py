@@ -11,14 +11,17 @@ except:
     GROQ_KEY = os.getenv("GROQ_API_KEY", "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")
     GEMINI_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0")
 
-# Google Sheets configuration - YOUR ACTUAL SHEET ID
-SHEET_ID = "1L04CvR2MWLPMFQrv0K58ggG0Qe6lLTHJq3cl8hCOI3U"  # Your sheet ID
+# Google Sheets configuration - Comment out if using sample data
+# SHEET_ID = "1L04CvR2MWLPMFQrv0K58ggG0Qe6lLTHJq3cl8hCOI3U"
 
-# Tab names - match exactly what's in your Google Sheet
+# Set to True to use sample data instead of Google Sheets
+USE_SAMPLE_DATA = True
+
+# Tab names - these will be used for both sample data and sheet names
 TABS = [
-    "GSC Performance",  # Change to match your actual tab names
-    "GSC Countries",
-    "GSC Devices", 
+    "GSC Performance",
+    "GSC Countries", 
+    "GSC Devices",
     "GSC Queries",
     "Rank Tracking"
 ]
