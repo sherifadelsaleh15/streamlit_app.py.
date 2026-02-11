@@ -16,16 +16,17 @@ st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
 GROQ_KEY = "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"
 GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
 
-# --- AI HELPER ---
+# --- HELPER FUNCTIONS ---
 def get_ai_insight(df, tab_name):
     try:
         data_summary = df.head(15).to_string()
         genai.configure(api_key=GEMINI_KEY)
-        model_options = ['gemini-2.0-flash', 'gemini-3-flash-preview']
+        # Updated 2026 Model Endpoints to fix 404 error
+        model_options = ['gemini-2.0-flash', 'gemini-3-flash-preview', 'gemini-2.5-flash']
         for m_name in model_options:
             try:
                 model = genai.GenerativeModel(m_name)
-                response = model.generate_content(f"Analyze: {tab_name} data:\n{data_summary}")
+                response = model.generate_content(f"Senior Strategic Analyst. Analyze: {tab_name} data:\n{data_summary}")
                 return response.text
             except: continue
         return "AI Error: Model endpoints unavailable."
@@ -52,14 +53,15 @@ sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
 if not tab_df.empty:
-    # --- SPECIFIC COLUMN DETECTION ---
-    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'LOCATION'])), None)
-    
-    # Identify Clicks AND Position for GSC
-    click_col = next((c for c in tab_df.columns if 'CLICK' in c.upper()), None)
-    pos_col = next((c for c in tab_df.columns if 'POSITION' in c.upper() or 'RANK' in c.upper()), None)
-    kw_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM'])), None)
+    # --- FAILSAFE COLUMN DETECTION ---
+    loc_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['REGION', 'COUNTRY', 'GEO', 'LOCATION'])), None)
+    # Priority for Clicks in GSC
+    click_col = next((c for c in tab_df.columns if 'CLICKS' in c.upper()), None)
+    value_col = click_col if click_col else next((c for c in tab_df.columns if any(x in c.upper() for x in ['SESSIONS', 'USERS', 'VALUE', 'POSITION', 'VIEWS'])), None)
+    metric_name_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['QUERY', 'KEYWORD', 'TERM', 'METRIC'])), None)
+    page_col = next((c for c in tab_df.columns if any(x in c.upper() for x in ['PAGE', 'URL', 'PATH', 'LANDING'])), None)
     date_col = 'dt'
+    is_ranking = value_col and 'POSITION' in value_col.upper()
 
     # --- SIDEBAR FILTERS ---
     if loc_col:
@@ -82,68 +84,58 @@ if not tab_df.empty:
     # --- CENTERED LEADERBOARDS ---
     L, M, R = st.columns([1, 4, 1])
     with M:
-        if "GSC" in sel_tab.upper() and kw_col and click_col and pos_col:
-            st.subheader("Keyword Performance: Clicks vs. Avg Position")
-            
-            # Aggregate data by Keyword
-            kw_perf = tab_df.groupby(kw_col).agg({click_col: 'sum', pos_col: 'mean'}).reset_index()
-            # Sort by Top Clicks
-            kw_perf = kw_perf.sort_values(by=click_col, ascending=False).head(20)
+        if "GSC" in sel_tab.upper() and metric_name_col and value_col:
+            st.subheader(f"Top 20 Keywords by {value_col.replace('_', ' ')}")
+            top_k = tab_df.groupby(metric_name_col)[value_col].sum().reset_index()
+            # Sort ascending for Plotly horizontal bottom-to-top rendering
+            top_k = top_k.sort_values(by=value_col, ascending=True).tail(20)
+            fig_k = px.bar(top_k, x=value_col, y=metric_name_col, orientation='h', template="plotly_white", color_discrete_sequence=['#4285F4'], text=value_col)
+            fig_k.update_traces(textposition='outside')
+            st.plotly_chart(fig_k, use_container_width=True)
 
-            # Create a Dual-Metric Chart (Bar for Clicks, Line for Position)
-            fig_gsc = go.Figure()
-            # Bars for Clicks
-            fig_gsc.add_trace(go.Bar(x=kw_perf[kw_col], y=kw_perf[click_col], name="Clicks", marker_color='#4285F4', yaxis='y1'))
-            # Line for Position
-            fig_gsc.add_trace(go.Scatter(x=kw_perf[kw_col], y=kw_perf[pos_col], name="Avg Position", line=dict(color='#DB4437', width=3), yaxis='y2'))
-
-            fig_gsc.update_layout(
-                template="plotly_white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(title="Total Clicks", side="left"),
-                yaxis2=dict(title="Avg Position", side="right", overlaying="y", autorange="reversed"),
-                margin=dict(l=20, r=20, t=50, b=100)
-            )
-            st.plotly_chart(fig_gsc, use_container_width=True)
-        
-        elif any(x in sel_tab.upper() for x in ["GA4", "PAGE", "DATA"]):
-            # Standard GA4 Leaderboard if not GSC
-            val_col = click_col if click_col else next((c for c in tab_df.columns if 'SESSIONS' in c.upper() or 'VIEWS' in c.upper()), None)
-            name_col = kw_col if kw_col else next((c for c in tab_df.columns if 'PAGE' in c.upper()), None)
-            if name_col and val_col:
-                top_ga4 = tab_df.groupby(name_col)[val_col].sum().reset_index().sort_values(by=val_col, ascending=True).tail(20)
-                fig_ga4 = px.bar(top_ga4, x=val_col, y=name_col, orientation='h', color_discrete_sequence=['#34A853'], template="plotly_white")
-                st.plotly_chart(fig_ga4, use_container_width=True)
+        if any(x in sel_tab.upper() for x in ["GA4", "PAGE", "DATA"]) and (page_col or metric_name_col) and value_col:
+            st.subheader("Top Performance View")
+            p_col = page_col if page_col else metric_name_col
+            top_p = tab_df.groupby(p_col)[value_col].sum().reset_index().sort_values(by=value_col, ascending=True).tail(20)
+            fig_p = px.bar(top_p, x=value_col, y=p_col, orientation='h', template="plotly_white", color_discrete_sequence=['#34A853'], text=value_col)
+            fig_p.update_traces(textposition='outside')
+            st.plotly_chart(fig_p, use_container_width=True)
 
     st.divider()
 
     # --- STRATEGIC AI REPORT ---
     st.subheader("Strategic AI Report")
+    if "ai_report" not in st.session_state: st.session_state.ai_report = ""
     if st.button("Generate Executive Analysis"):
-        with st.spinner("Analyzing..."): st.write(get_ai_insight(tab_df, sel_tab))
+        with st.spinner("Analyzing..."): st.session_state.ai_report = get_ai_insight(tab_df, sel_tab)
+    if st.session_state.ai_report:
+        st.markdown(st.session_state.ai_report)
 
     st.divider()
 
-    # --- MONTHLY PERFORMANCE TRENDS (BY KEYWORD) ---
-    st.subheader("Monthly Performance Trends (Top Keywords)")
-    if kw_col and click_col and date_col in tab_df.columns:
-        # Get top 20 keywords globally for the charts
-        top_k_list = tab_df.groupby(kw_col)[click_col].sum().sort_values(ascending=False).head(20).index.tolist()
-        
-        # Display Trends
-        for kw in top_k_list:
-            kw_data = tab_df[tab_df[kw_col] == kw].sort_values('dt')
-            with st.expander(f"Trend for: {kw}"):
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    fig_trend = px.line(kw_data, x='dt', y=click_col, markers=True, title=f"Clicks Trend: {kw}")
-                    if pos_col in kw_data.columns:
-                        fig_trend.add_trace(go.Scatter(x=kw_data['dt'], y=kw_data[pos_col], name="Position", yaxis="y2", line=dict(dash='dot')))
-                        fig_trend.update_layout(yaxis2=dict(title="Position", overlaying="y", side="right", autorange="reversed"))
-                    st.plotly_chart(fig_trend, use_container_width=True, key=f"trend_{kw}")
-                with c2:
-                    st.write("Metric Details")
-                    st.dataframe(kw_data[['dt', click_col, pos_col]].dropna(axis=1), hide_index=True)
+    # --- MONTHLY PERFORMANCE TRENDS ---
+    st.subheader("Monthly Performance Trends")
+    show_forecast = st.checkbox("Show AI Projections", value=True)
+    trend_col = metric_name_col if metric_name_col else page_col
 
-else:
-    st.info("No data found. Please check your Google Sheet connection.")
+    if trend_col and value_col and date_col in tab_df.columns:
+        agg_sort = 'min' if is_ranking else 'sum'
+        top_items = tab_df.groupby(trend_col)[value_col].agg(agg_sort).sort_values(ascending=(agg_sort=='min')).head(20).index.tolist()
+        loc_list = sorted([str(x) for x in tab_df[loc_col].dropna().unique()], key=lambda x: x != 'Germany') if loc_col else [None]
+
+        for loc in loc_list:
+            loc_data = tab_df[tab_df[loc_col] == loc] if loc else tab_df
+            st.markdown(f"### Region: {loc if loc else 'Global'}")
+            for item in [i for i in top_items if i in loc_data[trend_col].unique()]:
+                item_data = loc_data[loc_data[trend_col] == item].sort_values('dt')
+                with st.expander(f"Data for: {item} in {loc}", expanded=(loc == 'Germany')):
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        fig = px.line(item_data, x='dt', y=value_col, markers=True, height=350)
+                        if show_forecast and len(item_data) >= 3:
+                            f = get_prediction(item_data.rename(columns={value_col: 'Value', 'dt': 'ds'}))
+                            if f is not None: fig.add_trace(go.Scatter(x=f['ds'], y=f['yhat'], mode='lines', name='Projection', line=dict(color='orange', dash='dash')))
+                        if is_ranking: fig.update_layout(yaxis=dict(autorange="reversed"))
+                        st.plotly_chart(fig, use_container_width=True, key=f"ch_{item}_{loc}")
+                    with c2:
+                        st.dataframe(item_data[['dt', value_col]].assign(dt=lambda x: x['dt'].dt.strftime('%b %Y')), hide_index=True)
