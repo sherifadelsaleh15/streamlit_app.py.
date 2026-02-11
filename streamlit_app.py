@@ -1,15 +1,13 @@
 import streamlit as st
 import pandas as pd
-import os
-import sys
-
-# Ensure Python looks in the current directory for the tabs folder
-sys.path.append(os.path.dirname(__file__))
-
 from modules.data_loader import load_and_preprocess_data
 
 # 1. Page Configuration
 st.set_page_config(layout="wide", page_title="2026 Strategic Dashboard")
+
+# Global Keys
+GEMINI_KEY = "AIzaSyAEssaFWdLqI3ie8y3eiZBuw8NVdxRzYB0"
+GROQ_KEY = "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"
 
 # 2. Authentication
 if "password_correct" not in st.session_state:
@@ -31,11 +29,11 @@ except Exception as e:
 sel_tab = st.sidebar.selectbox("Dashboard Section", list(df_dict.keys()))
 tab_df = df_dict.get(sel_tab, pd.DataFrame()).copy()
 
+# 5. Routing to Specialized Files
 if not tab_df.empty:
-    # ROUTING TO SEPARATE FILES
-    if "GSC" in sel_tab.upper():
-        from tabs.gsc_tab import render_gsc
-        render_gsc(tab_df, sel_tab)
+    if "GSC" in sel_tab.upper() or "POSITION" in sel_tab.upper():
+        from tabs.gsc_tab import render_gsc_tab
+        render_gsc_tab(tab_df, sel_tab, GEMINI_KEY)
     else:
-        from tabs.ga4_tab import render_ga4
-        render_ga4(tab_df, sel_tab)
+        from tabs.performance_tab import render_performance_tab
+        render_performance_tab(tab_df, sel_tab, GEMINI_KEY)
